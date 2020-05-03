@@ -1,0 +1,141 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=5]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+# State estimation in the state-space model
+
+## State estimation through the posterior distribution
+
+## How to obtain the state sequentially
+
+### A simple example
+
+
+```{r Figure 6.2, echo = FALSE, results='hide'}
+# <<Bayesian update of normal distribution>>
+
+# User-defined function performing Bayesian update
+baysian_update <- function(pri, lik){
+  pri_prec <- 1 / pri$var
+  lik_prec <- 1 / lik$var
+
+  pos_mean <- pri$mean * pri_prec / (pri_prec + lik_prec) + lik$mean * lik_prec / (pri_prec + lik_prec)
+  pos_prec <- pri_prec + lik_prec
+
+  return(list(
+    mean = pos_mean,
+     var = 1 / pos_prec
+  ))
+}
+
+# User-defined function performing state transition
+transition_update <- function(curr, trans){
+  return(list(
+    mean = curr$mean + trans$mean,
+     var = curr$var  + trans$var
+  ))
+}
+
+# User-defined function drawing normal distribution
+bell_curve <- function(mean, sd, col = "black"){
+  curve(dnorm(x, mean = mean, sd = sd), -20, 100,
+        xlim = c(-20, 100), ylim = c(0, 0.15), ann = FALSE, axes = FALSE, col = col)
+  lines(c(mean, mean   ),
+        c(                                   0, dnorm(mean   , mean = mean, sd = sd)),
+        lty = "dotdash", col = col)
+  lines(c(mean, mean+sd),
+        c(dnorm(mean+sd, mean = mean, sd = sd), dnorm(mean+sd, mean = mean, sd = sd)),
+        lty = "dashed" , col = col)
+}
+
+# Preprocessing regarding plot
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1))
+par(oma = c(2, 0, 0, 0)); par(mar = c(0, 0, 0, 0))
+
+# Prior distribution
+m0 <- 0
+C0 <- 8^2
+bell_curve(mean = m0, sd = sqrt(C0))
+
+# Likelihood
+y1 <- 20
+sigma2 <- 5^2
+par(new = TRUE)
+bell_curve(mean = y1, sd = sqrt(sigma2), col = "blue")
+
+# Posterior distribution
+posterior <- baysian_update(pri = list(mean = m0, var = C0),
+                            lik = list(mean = y1, var = sigma2))
+m1 <- posterior$mean
+C1 <- posterior$var
+bell_curve(mean = m1, sd = sqrt(C1), col = "red")
+
+# Posterior distribution = prior distribution
+bell_curve(mean = m1, sd = sqrt(C1))
+
+# One-step-ahead predictive distribution
+nu <- 40
+sigma2_w <- 5^2
+prediction <- transition_update( curr = list(mean = m1, var = C1),
+                                trans = list(mean = nu, var = sigma2_w))
+m2_hat <- prediction$mean
+C2_hat <- prediction$var
+par(new = TRUE)
+bell_curve(mean = m2_hat, sd = sqrt(C2_hat))
+
+# Likelihood
+y2 <- 80
+par(new = TRUE)
+bell_curve(mean = y2, sd = sqrt(sigma2), col = "blue")
+
+# Posterior distribution
+posterior <- baysian_update(pri = list(mean = m2_hat, var = C2_hat),
+                            lik = list(mean = y2, var = sigma2))
+m2 <- posterior$mean
+C2 <- posterior$var
+bell_curve(mean = m2, sd = sqrt(C2), col = "red")
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

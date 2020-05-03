@@ -1,0 +1,270 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=0]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+
+
+
+
+
+
+# Appendix F: Execution of particle filtering with library
+
+
+```{r Preload utility and user-defined functions, collapse=TRUE, include = FALSE}
+# <<Calculate the weighted quantile of particles (utility function distributed with library dlm)>>
+
+# quantile function for weighted particle clouds
+weighted.quantile <- function(x, w, probs)
+{
+  ## Make sure 'w' is a probability vector
+  if ((s <- sum(w)) != 1)
+    w <- w / s
+  ## Sort 'x' values
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  ## Evaluate cdf
+  W <- cumsum(w)
+  ## Invert cdf
+  tmp <- outer(probs, W, "<=")
+  n <- length(x)
+  quantInd <- apply(tmp, 1, function(x) (1 : n)[x][1])
+  ## Return
+  ret <- x[quantInd]
+  ret[is.na(ret)] <- x[n]
+  return(ret)
+}
+```
+
+## Example: artificial local-level model
+
+### pomp
+
+
+```{r Code F.1, collapse=TRUE}
+# <<Particle filtering (pomp) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+library(pomp)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# Model: specification
+
+# State equation (draw)
+state_draw <- function(X, W, delta.t, ...){
+  c(X = rnorm(1, mean = X, sd = sqrt(W)))
+}
+
+# Observation equation (draw)
+obs_draw <- function(X, V, ...){
+  c(Y = rnorm(1, mean = X, sd = sqrt(V)))
+}
+
+# Observation equation (evaluation)
+obs_eval <- function(Y, X, V, log, ...){
+  dnorm(Y, mean = X, sd = sqrt(V), log = log)
+}
+
+# Model: generation
+pomp_mod <- pomp(data = data.frame(time = seq_along(y), Y = y), 
+                 times = seq_along(y), t0 = 0,
+                 rprocess = discrete_time(step.fun = state_draw, delta.t = 1),
+                 rmeasure = obs_draw, dmeasure = obs_eval
+            )
+
+# Particle filtering: execution
+pomp_smc_out <- pfilter(data = pomp_mod, Np = N,
+                        params = c(W = mod$W, V = mod$V, X.0 = mod$m0),
+                        save.states = TRUE
+                )
+
+# Find mean, 2.5%, and 97.5% values
+pomp_m       <- sapply(1:t_max, function(t){
+                  mean(pomp_smc_out@saved.states[[t]])
+                })
+pomp_m_quant <- sapply(1:t_max, function(t){
+                  quantile(pomp_smc_out@saved.states[[t]], probs=c(0.025, 0.975))
+                })
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, m, pomp_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman filtering)",  "Mean (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", m_quant), cbind(pomp_m_quant["2.5%", ], pomp_m_quant["97.5%", ])),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman filtering)",  "95% intervals (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+### NIMBLE
+
+
+```{r Code F.2, collapse=TRUE}
+# <<Particle filtering (NIMBLE) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+library(nimble)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Model: specification
+nimble_mod_script <- nimbleCode({
+  # State equation
+  x[1] ~ dnorm(m0, 1/C0)
+  for (t in 2:(t_max+1)){
+    x[t] ~ dnorm(x[t-1], 1/W)
+  }
+
+  # Observation equation
+  # y[1] as dummy
+  for (t in 2:(t_max+1)){
+    y[t] ~ dnorm(x[t], 1/V)
+  }
+})
+
+# Model: generation
+nimble_mod <- nimbleModel(code = nimble_mod_script,
+                          data = list(y = y),
+                          constants = list(t_max = t_max,
+                                           W = mod$W, V = mod$V,
+                                           m0 = mod$m0, C0 = mod$C0)
+              )
+
+# Particle filtering: generation
+nimble_smc_out <- buildBootstrapFilter(model = nimble_mod,
+                                       nodes = "x",
+                                       control = list(thresh = 1.0,
+                                                      saveAll = TRUE)
+                  )
+
+# Model: compilation
+compiled_nimble_mod <- compileNimble(nimble_mod)
+
+# Particle filtering: compilation
+compiled_nimble_smc_out <- compileNimble(nimble_smc_out, project = nimble_mod)
+
+# Particle filtering: execution
+compiled_nimble_smc_out$run(m = N)     # Display likelihood in the case of completion
+
+# Retrieve state and weight, then format the result by removing the forefront corresponding to the prior distribution, etc.
+nimble_x <- as.matrix(compiled_nimble_smc_out$mvWSamples, "x"  )
+nimble_x <- t(    nimble_x[, -1])
+nimble_w <- as.matrix(compiled_nimble_smc_out$mvWSamples, "wts")
+nimble_w <- t(exp(nimble_w[, -1]))
+       y <- y[-1]
+
+# Find mean, 2.5%, and 97.5% values
+nimble_m       <- sapply(1:t_max, function(t){
+                    weighted.mean(nimble_x[t, ], w = nimble_w[t, ])
+                  })
+nimble_m_quant <- lapply(c(0.025, 0.975), function(quant){
+                    sapply(1:t_max, function(t){
+                      weighted.quantile(nimble_x[t, ], w = nimble_w[t, ],
+                                        probs = quant)
+                    })
+                  })
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, m, nimble_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman filtering)",  "Mean (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", nimble_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman filtering)",  "95% intervals (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

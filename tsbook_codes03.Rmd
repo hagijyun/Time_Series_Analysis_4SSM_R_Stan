@@ -1,0 +1,141 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=2]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+
+# Push LC_TIME
+old_lc_time <- Sys.getlocale("LC_TIME"); Sys.setlocale("LC_TIME", "English")
+```
+
+
+
+
+
+# Fundamentals of handling time series data with R
+
+## Object for handling time series
+
+```{r Code 3.1, collapse=TRUE, fig.show = 'hide'}
+# <<Data on annual flow of the Nile>>
+
+# Display data contents
+Nile
+
+# Plot the data
+plot(Nile)
+```
+
+
+```{r Code 3.2, collapse=TRUE, fig.show = 'hide'}
+# <<Data on CO2 concentration in the atmosphere>>
+
+# Load the data
+Ryori <- read.csv("CO2.csv")
+
+# Cast the data to ts class, truncating it by December 2014
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# Display data contents
+y
+
+# Plot the data
+plot(y)
+```
+
+
+```{r Code 3.3, collapse=TRUE}
+# <<Function handling multiple ts class objects>>
+
+# Artificial second time series (shifting back the start time of the Nile to five years ago)
+Nile2 <- ts(Nile, start = 1866)
+
+# Unite multiple time series
+ts.union(Nile, Nile2)
+
+# Artificial second time series (doubling observations of the Nile)
+Nile2 <- 2 * Nile
+
+# Plot multiple time series in the same area
+ts.plot(cbind(Nile, Nile2), ylab = "y", lty = c("solid", "dashed"))
+```
+
+
+
+## Handling of time information
+
+```{r Code 3.4, collapse=TRUE}
+# <<Time information on ts class object>>
+
+# Start time point, end time point, and frequency
+tsp(Nile)
+
+# A sequence of time values
+time(Nile)
+```
+
+
+```{r Code 3.5, collapse=TRUE}
+# <<Date class object>>
+
+# Cast the strings to Date class object
+day <- as.Date("2000-01-01")
+
+# Confirm the structure
+str(day)
+
+# Generate consecutive Date class objects
+days <- seq(from = as.Date("2000-01-01"), to = as.Date("2000-01-31"),
+            by = "day")
+
+# Confirm contents
+days
+
+# Extract information about the day of the week
+weekdays(days)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+
+# Pop LC_TIME
+Sys.setlocale("LC_TIME", old_lc_time)
+```

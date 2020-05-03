@@ -1,0 +1,430 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=7]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+# Sequential solution for the linear Gaussian state-space model
+
+## Kalman filter
+
+### Kalman filtering
+
+```{r Code 8.1, collapse=TRUE}
+# <<Kalman filtering (from scratch)>>
+
+# Set the flow data of the Nile to observations
+y <- Nile
+t_max <- length(y)
+
+# Function performing Kalman filtering for one time point
+Kalman_filtering <- function(m_t_minus_1, C_t_minus_1, t){
+  # One-step-ahead predictive distribution
+  a_t <- G_t %*% m_t_minus_1
+  R_t <- G_t %*% C_t_minus_1 %*% t(G_t) + W_t
+
+  # One-step-ahead predictive likelihood
+  f_t <- F_t %*% a_t
+  Q_t <- F_t %*% R_t %*% t(F_t) + V_t
+
+  # Kalman gain
+  K_t <- R_t %*% t(F_t) %*% solve(Q_t)
+
+  # State update
+  m_t <- a_t + K_t %*% (y[t] - f_t)
+  C_t <- (diag(nrow(R_t)) - K_t %*% F_t) %*% R_t
+
+  # Return the mean and variance of the filtering distribution (and also one-step-ahead predictive distribution)
+  return(list(m = m_t, C = C_t,
+              a = a_t, R = R_t))
+}
+
+# Set parameters of the linear Gaussian state space (all 1 x 1 matrices)
+G_t <- matrix(1, ncol = 1, nrow = 1); W_t <- matrix(exp(7.29), ncol = 1, nrow = 1)
+F_t <- matrix(1, ncol = 1, nrow = 1); V_t <- matrix(exp(9.62), ncol = 1, nrow = 1)
+ m0 <- matrix(0, ncol = 1, nrow = 1);  C0 <- matrix(     1e+7, ncol = 1, nrow = 1)
+
+# Calculate the mean and variance of the filtering distribution (and also one-step-ahead predictive distribution)
+
+# Allocate memory for state (mean and covariance)
+m <- rep(NA_real_, t_max); C <- rep(NA_real_, t_max)
+a <- rep(NA_real_, t_max); R <- rep(NA_real_, t_max)
+
+# Time point: t = 1
+KF <- Kalman_filtering(m0, C0, t = 1)
+m[1] <- KF$m; C[1] <- KF$C
+a[1] <- KF$a; R[1] <- KF$R
+
+# Time point: t = 2 to t_max
+for (t in 2:t_max){
+  KF <- Kalman_filtering(m[t-1], C[t-1], t = t)
+  m[t] <- KF$m; C[t] <- KF$C
+  a[t] <- KF$a; R[t] <- KF$R
+}
+
+# Ignore the display of following codes
+
+# Find 2.5% and 97.5% values for 95% intervals of the filtering distribution
+m_sdev <- sqrt(C)
+m_quant <- list(m + qnorm(0.025, sd = m_sdev), m + qnorm(0.975, sd = m_sdev))
+
+# Plot results
+ts.plot(cbind(y, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (filtering distribution)", "95% intervals (filtering distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+### Kalman prediction
+
+```{r Code 8.2, collapse=TRUE}
+# <<Kalman prediction (from scratch)>>
+
+# Assuming Kalman filtering completed
+
+# Prediction period
+t <- t_max    # From the last time point
+nAhead <- 10  # Ten time points ahead
+
+# Function for one-step-ahead Kalman prediction (k = 1)
+Kalman_prediction <- function(a_t0, R_t0){
+  # One-step-ahead predictive distribution
+  a_t1 <- G_t_plus_1 %*% a_t0
+  R_t1 <- G_t_plus_1 %*% R_t0 %*% t(G_t_plus_1) + W_t_plus_1
+
+  # Return the mean and variance of the one-step-ahead predictive distribution
+  return(list(a = a_t1, R = R_t1))
+}
+
+# Set parameters of the linear Gaussian state space (time-invariant)
+G_t_plus_1 <- G_t; W_t_plus_1 <- W_t
+
+# Calculate the mean and variance for the k-steps-ahead predictive distribution
+
+# Allocate memory for state (mean and covariance)
+a_ <- rep(NA_real_, t_max + nAhead); R_ <- rep(NA_real_, t_max + nAhead)
+
+# k = 0 (zero-step-ahead predictive distribution corresponds to filtering distribution)
+a_[t + 0] <- m[t]; R_[t + 0] <- C[t]
+
+# k = 1 to nAhead
+for (k in 1:nAhead){
+  KP <- Kalman_prediction(a_[t + k-1], R_[t + k-1])
+  a_[t + k] <- KP$a; R_[t + k] <- KP$R
+}
+
+# Ignore the display of following codes
+
+# Find 2.5% and 97.5% values for 95% intervals of the predictive distribution
+a_ <- ts(a_, start = 1871)
+a_sdev <- sqrt(R_)
+a_quant <- list(a_ + qnorm(0.025, sd = a_sdev), a_ + qnorm(0.975, sd = a_sdev))
+
+# Plot results
+ts.plot(cbind(y, a_, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (predictive distribution)", "95% intervals (predictive distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+### Kalman smoothing
+
+```{r Code 8.3, collapse=TRUE}
+# <<Kalman smoothing (from scratch)>>
+
+# Assuming Kalman filtering completed
+
+# Function performing Kalman smoothing for one time point
+Kalman_smoothing <- function(s_t_plus_1, S_t_plus_1, t){
+  # Smoothing gain
+  A_t <- C[t] %*% t(G_t_plus_1) %*% solve(R[t+1])
+
+  # State update
+  s_t <- m[t] + A_t %*% (s_t_plus_1 - a[t+1])
+  S_t <- C[t] + A_t %*% (S_t_plus_1 - R[t+1]) %*% t(A_t)
+
+  # Return the mean and variance of the smoothing distribution
+  return(list(s = s_t, S = S_t))
+}
+
+# Find the mean and variance of the smoothing distribution
+
+# Allocate memory for state (mean and covariance)
+s <- rep(NA_real_, t_max); S <- rep(NA_real_, t_max)
+
+# Time point: t = t_max
+s[t_max] <- m[t_max]; S[t_max] <- C[t_max]
+
+# Time point: t = t_max - 1 to 1
+for (t in (t_max-1):1){
+  KS <- Kalman_smoothing(s[t+1], S[t+1], t = t)
+  s[t] <- KS$s; S[t] <- KS$S
+}
+
+# Ignore the display of following codes
+
+# Find 2.5% and 97.5% values for 95% intervals of the filtering distribution
+s_sdev <- sqrt(S)
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# Plot results
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (smoothing distribution)", "95% intervals (smoothing distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+## Example: local-level model case
+
+### Confirmation of the purpose and data collection
+
+### Preliminary examination of data
+
+
+
+
+### Model definition
+
+```{r Code 8.4, collapse=TRUE}
+# <<Define local-level model>>
+
+# Preprocessing
+library(dlm)
+
+# Setting of state space model
+mod <- dlmModPoly(order = 1)
+
+# Confirmation of model contents
+str(mod)
+```
+
+
+### Specification of parameter values
+
+```{r Code 8.5, collapse=TRUE}
+# <<Specification of parameter values in local-level model>>
+
+# User-defined function to define and build a model
+build_dlm <- function(par) {
+  mod$W[1, 1] <- exp(par[1])
+  mod$V[1, 1] <- exp(par[2])
+
+  return(mod)
+}
+
+# Maximum likelihood estimation of parameters, confirming the search results with three different initial values
+lapply(list(c(0, 0), c(1, 10), c(20, 3)), function(parms){
+  dlmMLE(y = Nile, parm = parms, build = build_dlm)
+})
+
+# Maximum likelihood estimation of parameters, including the Hessian matrix in return value
+fit_dlm <- dlmMLE(y = Nile, parm = c(0, 0), build = build_dlm, hessian = TRUE)
+
+# Find the (asymptotic) standard error in the maximum likelihood estimation from the Hessian matrix using the delta method
+exp(fit_dlm$par) * sqrt(diag(solve(fit_dlm$hessian)))
+
+# Set the maximum likelihood estimates of parameters in the model
+mod <- build_dlm(fit_dlm$par)
+
+# Confirmation of the results
+mod
+```
+
+
+### Execution of filtering, prediction, and smoothing
+
+#### Filtering
+
+```{r Code 8.6, collapse=TRUE}
+# <<Kalman filtering>>
+
+# Filtering process
+dlmFiltered_obj <- dlmFilter(y = Nile, mod = mod)
+
+# Confirmation of the results
+str(dlmFiltered_obj, max.level = 1)
+
+# Find the mean and standard deviation of the filtering distribution
+m <- dropFirst(dlmFiltered_obj$m)
+m_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmFiltered_obj$U.C, dlmFiltered_obj$D.C)
+            ))
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the filtering distribution
+m_quant <- list(m + qnorm(0.025, sd = m_sdev), m + qnorm(0.975, sd = m_sdev))
+
+# Plot results
+ts.plot(cbind(Nile, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (filtering distribution)", "95% intervals (filtering distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 32, cex = 0.6)
+```
+
+
+#### Prediction
+
+```{r Code 8.7, collapse=TRUE}
+# <<Kalman prediction>>
+
+# Prediction processing
+dlmForecasted_obj <- dlmForecast(mod = dlmFiltered_obj, nAhead = 10)
+
+# Confirmation of the results
+str(dlmForecasted_obj, max.level = 1)
+
+# Find the mean and standard deviation of the predictive distribution
+a <- ts(data = dlmForecasted_obj$a, start = c(1971, 1))
+a_sdev <- sqrt(
+            as.numeric(
+              dlmForecasted_obj$R
+            )
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the predictive distribution
+a_quant <- list(a + qnorm(0.025, sd = a_sdev), a + qnorm(0.975, sd = a_sdev))
+
+# Plot results
+ts.plot(cbind(Nile, a, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (predictive distribution)", "95% intervals (predictive distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+#### Smoothing
+
+```{r Code 8.8, collapse=TRUE}
+# <<Kalman smoothing>>
+
+# Smoothing processing
+dlmSmoothed_obj <- dlmSmooth(y = Nile, mod = mod)
+
+# Confirmation of the results
+str(dlmSmoothed_obj, max.level = 1)
+
+# Find the mean and standard deviation of the smoothing distribution
+s <- dropFirst(dlmSmoothed_obj$s)
+s_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+            ))
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the smoothing distribution
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# Plot results
+ts.plot(cbind(Nile, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (smoothing distribution)", "95% intervals (smoothing distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+### Diagnostic checking for the results
+
+#### Likelihood
+
+```{r Code 8.9, collapse=TRUE}
+# <<Likelihood in linear Gaussian state space model>>
+
+# Calculation of "negative" log-likelihood
+dlmLL(y = Nile, mod = mod)
+```
+
+
+#### Innovations (prediction error/residuals)
+
+```{r Code 8.10, collapse=TRUE}
+# <<Model diagnosis using innovations>>
+
+# Adjust display area
+oldpar <- par(no.readonly = TRUE)
+par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+
+# Confirmation of autocorrelation
+tsdiag(object = dlmFiltered_obj)
+par(oldpar)                            # Restore parameters regarding display
+
+# Confirm normality
+# Get standardized innovations
+e <- residuals(object = dlmFiltered_obj, sd = FALSE)
+
+# Confirmation of the results
+e
+
+# Display Q-Q plot
+qqnorm(e)
+qqline(e)     # Guideline through 25% and 75% points does not always have a 45-degree inclination
+```
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

@@ -1,0 +1,230 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=1]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  font_add("meiryo", "meiryo.ttc")
+  showtext_begin()
+
+  # Character expansion ratio for plot
+  par(cex.lab = 1.5); par(mar = c(5, 5, 4, 2) + 0.1)
+}
+```
+
+
+
+# Fundamentals of probability and statistics
+
+
+## Probability
+
+```{r Figure 2.1, echo = FALSE, results='hide'}
+# <<Example of probability density function>>
+
+curve(dunif (x, min    = 0  , max    = 1  ),  0,  1, xlab = "Realization", ylab = "Density")
+curve(dbeta (x, shape1 = 0.5, shape2 = 0.5),  0,  1, xlab = "Realization", ylab = "Density")
+curve(dgamma(x, rate   = 1  , shape  = 2  ),  0, 10, xlab = "Realization", ylab = "Density")
+```
+
+
+## Mean and variance
+
+```{r Figure 2.2, echo = FALSE, results='hide'}
+# <<Example of mean and variance>>
+
+rate <- 1; shape <- 2
+curve(dgamma(x, rate = rate, shape = shape), 0, 10, xlab = "Realization", ylab = "Density")
+
+g_mean <- rate * shape
+g_sd   <- sqrt(rate * shape^2)
+
+lines(c(g_mean, g_mean), c(0, dgamma(x = g_mean, rate = rate, shape = shape)),
+      lty = "dotdash")
+text(x = g_mean, y = 0, adj = c(-0.4, 0), labels = "Mean")
+lines(c(g_mean, g_mean+g_sd), c(0.07, 0.07),
+      lty = "dashed")
+text(x = g_mean, y = 0.07, adj = c(-0.2, 1.4), labels = "Standard deviation")
+
+if (SAVE_PLOT_PDF == TRUE){ plot_family = "meiryo" }else{ plot_family = "" }
+mtext(at = g_mean, side = 1, adj = 0.4, cex = 3, text = "\U000261d", family = plot_family)
+```
+
+
+## Normal distribution
+
+```{r Figure 2.3&4, echo = FALSE, results='hide'}
+# <<Examples of normal distribution>>
+
+# One dimension
+curve(dnorm, -3,  3, xlab = "Realization", ylab = "Density")
+
+# Two dimensions
+# Preprocessing
+library(mvtnorm)
+
+y1 <- seq(from = -3, to = 3, length.out = 30)
+y2 <- y1
+Dens <- outer(y1, y2, function(x, y){ dmvnorm(cbind(x, y)) })
+persp(y1, y2, Dens,
+      theta = 30, phi = 30, xlab = "\nY1", ylab = "\nY2", zlab = "\n\nDensity",
+      ticktype = "detailed", expand = 0.5, border = "#80808080", cex.lab = 1.0)
+```
+
+
+## Relation among multiple random variables
+
+## Stochastic process
+
+## Covariance and correlation
+
+```{r Figure 2.7, echo = FALSE, results='hide'}
+# <<Examples of correlation coefficient>>
+
+# Preprocessing
+set.seed(23)
+library(MASS)         # Use of mvrnorm()
+  
+# Default covariance matrix (2 x 2 identity matrix)
+Sigma <- diag(2)
+
+# Correlation coefficient -0.9
+Sigma[2, 1] <- Sigma[1, 2] <- -0.9
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+
+# Correlation coefficient 0
+Sigma[2, 1] <- Sigma[1, 2] <- 0
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+
+# Correlation coefficient 0.9
+Sigma[2, 1] <- Sigma[1, 2] <- 0.9
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+```
+
+
+
+```{r Figure 2.8, echo = FALSE, results='hide'}
+# <<Points on the circle>>
+
+# Generate points on the circle having its center at 0 and a radius of 1 as two dependent variables
+angle_seq <- seq(from = -pi, to = pi, length.out = 1000)
+Z <- cbind(X = cos(angle_seq), Y = sin(angle_seq))
+
+# Scatter plot
+plot(Z, pch = 1, asp = 1)
+
+# Correlation coefficient
+cor(Z)
+```
+
+
+
+```{r Figure 2.9, echo = FALSE, results='hide'}
+# <<Examples of autocorrelation coefficient>>
+
+# Preprocessing
+par(cex.lab = 1.0)
+par(mfrow = c(1, 2), pty = "s"); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 1, 2))
+
+# Case without fluctuation
+y <- ts(1:100)
+plot(y, xlab = "Time", ylab = "Data")
+acf(y, main = "", xlab = "Lag", ylab = "Autocorrelation coefficient")
+
+# Case with a regular cycle
+rad_seq <- seq(from = 0, to = 2*pi*8, length.out = 100)
+y <- ts(cos(rad_seq), start = 0, freq = (100-1)/8)
+plot(y, type = "l", xlab = "Time (cycle)", ylab = "Data");
+acf(y, main = "", xlab = "Lag (period)", ylab = "Autocorrelation coefficient")
+
+# Post-processing
+par(oldpar)
+```
+
+
+## Stationary and nonstationary processes
+
+```{r Figure 2.10, echo = FALSE, results='hide'}
+# <<Stationary and nonstationary processes>>
+
+# Setting random seed (ensuring reproducibility)
+set.seed(1234)
+
+# Set time series length and allocate memory for observations
+t_max <- 800
+Y <- ts(start = 1, end = t_max)
+
+# AR(1) coefficient
+phi <- 0.5
+
+# Generate observations
+Y[1] <- 0
+for (t in 2:t_max){
+  Y[t] <- phi * Y[t-1] + rnorm(n = 1)
+}
+
+# Plot
+plot(Y)
+
+# AR(1) coefficient
+phi <- 1.0
+
+# Generate observations
+Y[1] <- 0
+for (t in 2:t_max){
+  Y[t] <- phi * Y[t-1] + rnorm(n = 1)
+}
+
+# Plot
+plot(Y)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

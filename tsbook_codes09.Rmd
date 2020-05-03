@@ -1,0 +1,937 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=8]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+
+# Push LC_TIME
+old_lc_time <- Sys.getlocale("LC_TIME"); Sys.setlocale("LC_TIME", "English")
+```
+
+
+```{r Preload utility and user-defined functions, include = FALSE}
+# <<Preload user-defined functions>>
+
+# User-defined function for mean absolute percentage error (MAPE)
+MAPE <- function(true, pred){
+  mean(abs((pred - true) / true))
+}
+```
+
+
+# Introduction and analysis examples of a well-known component model in the linear Gaussian state-space model
+
+## Combination of individual models
+
+## Local-level model
+
+### Example: artificial local-level model
+
+```{r Code 9.1, collapse=TRUE}
+# <<Generate artificial data that obey local-level model>>
+
+# Preprocessing
+set.seed(23)
+library(dlm)
+
+# Setting of local-level model
+W <- 1
+V <- 2
+m0 <- 10
+C0 <- 9
+mod <- dlmModPoly(order = 1, dW = W, dV = V, m0 = m0, C0 = C0)
+
+# Generate observations using Kalman prediction
+t_max <- 200
+sim_data <- dlmForecast(mod = mod, nAhead = t_max, sampleNew = 1)
+y <- sim_data$newObs[[1]]
+
+# Cast the result to ts class
+y <- ts(as.vector(y))
+
+# Plot results
+plot(y, ylab = "y")
+```
+
+
+
+```{r Figures 9.2&3&4, echo = FALSE, results='hide'}
+# <<Analysis of artificial local-level model with Kalman filter>>
+
+# Kalman filtering
+dlmFiltered_obj <- dlmFilter(y = y, mod = mod)
+
+# Find the mean and standard deviation of the filtering distribution
+m <- dropFirst(dlmFiltered_obj$m)
+m_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmFiltered_obj$U.C, dlmFiltered_obj$D.C)
+            ))
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the filtering distribution
+m_quant <- list(m + qnorm(0.025, sd = m_sdev), m + qnorm(0.975, sd = m_sdev))
+
+# Plot results
+ts.plot(cbind(y, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (filtering distribution)", "95% intervals (filtering distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# Kalman prediction
+dlmForecasted_obj <- dlmForecast(mod = dlmFiltered_obj, nAhead = 10)
+
+# Find the mean and standard deviation of the predictive distribution
+a <- ts(data = dlmForecasted_obj$a, start = t_max+1)
+a_sdev <- sqrt(
+            as.numeric(
+              dlmForecasted_obj$R
+            )
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the predictive distribution
+a_quant <- list(a + qnorm(0.025, sd = a_sdev), a + qnorm(0.975, sd = a_sdev))
+
+# Plot results
+ts.plot(cbind(y, a, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (predictive distribution)", "95% intervals (predictive distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "bottomleft", text.width = 70, cex = 0.6)
+
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Find the mean and standard deviation of the smoothing distribution
+s <- dropFirst(dlmSmoothed_obj$s)
+s_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+            ))
+          )
+
+# Find 2.5% and 97.5% values for 95% intervals of the smoothing distribution
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# Plot results
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (smoothing distribution)", "95% intervals (smoothing distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# Save the results
+save(t_max, y, mod, m, m_quant, a, a_quant, s, s_quant, 
+     file = "ArtifitialLocalLevelModel.RData")
+```
+
+
+## Local-trend model
+
+## Seasonal model
+
+### Approach from the time domain
+
+### Approach from the frequency domain
+
+### Example: CO2 concentration in the atmosphere
+
+#### Local-trend model + seasonal model (time-domain approach)
+
+```{r Code 9.2, collapse=TRUE}
+# <<Local-trend model + seasonal model (time-domain approach)>>
+
+# Preprocessing
+library(dlm)
+
+# Load the data
+Ryori <- read.csv("CO2.csv")
+
+# Cast the data to ts class, truncating it by December 2014
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# Model setting: local-trend model + seasonal model (time-domain approach)
+build_dlm_CO2a <- function(par) {
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[4]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_CO2a <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_CO2a)
+fit_dlm_CO2a
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_CO2a(fit_dlm_CO2a$par)
+
+# Kalman filtering
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_obja <- dlmFiltered_obj              # Save under a different name for later comparison of prediction values
+
+# Mean of the filtering distribution
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 3])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations")
+ts.plot(   mu, ylab = "Level component", ylim = c(350, 405))
+ts.plot(gamma, ylab = "Seasonal component"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+#### Local-level model + seasonal model (time-domain approach)
+
+```{r Code 9.3, collapse=TRUE}
+# <<Local-level model + seasonal model (time-domain approach)>>
+
+# Model setting: local-level model + seasonal model (time-domain approach)
+build_dlm_CO2b <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# Ignore the display of following codes
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_CO2b <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_CO2b)
+fit_dlm_CO2b
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_CO2b(fit_dlm_CO2b$par)
+
+# Kalman filtering
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_objb <- dlmFiltered_obj              # Save under a different name for later comparison of prediction values
+
+# Mean of the filtering distribution
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 2])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations")
+ts.plot(   mu, ylab = "Level component", ylim = c(350, 405))
+ts.plot(gamma, ylab = "Seasonal component"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+#### Local-trend model + seasonal model (frequency-domain approach)
+
+```{r Code 9.4, collapse=TRUE}
+# <<Local-trend model + seasonal model (frequency domain approach)>>
+
+# Model setting: local-trend model + seasonal model (frequency domain approach)
+build_dlm_CO2c <- function(par) {
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModTrig(s = 12, q = 2, dW = exp(par[4]), dV = 0)
+  )
+}
+
+# Ignore the display of following codes
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_CO2c <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_CO2c)
+fit_dlm_CO2c
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_CO2c(fit_dlm_CO2c$par)
+
+# Kalman filtering
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_objc <- dlmFiltered_obj              # Save under a different name for later comparison of prediction values
+
+# Mean of the filtering distribution
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 3] + dlmFiltered_obj$m[, 5])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations")
+ts.plot(   mu, ylab = "Level component", ylim = c(350, 405))
+ts.plot(gamma, ylab = "Seasonal component"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+
+```{r Code 9.5, collapse=TRUE}
+# <<Forecasts from 2015>>
+
+# Kalman prediction
+dlmForecasted_object <- dlmForecast(mod = dlmFiltered_obj, nAhead = 12)
+
+# Find the standard deviation and the 2.5% and 97.5% values of the prediction value
+f_sd <- sqrt(as.numeric(dlmForecasted_object$Q))
+f_lower <- dlmForecasted_object$f + qnorm(0.025, sd = f_sd)
+f_upper <- dlmForecasted_object$f + qnorm(0.975, sd = f_sd)
+
+# Unite the entire observation along with the mean, 2.5%, and 97.5% values of the prediction values into ts class object
+y_union <- ts.union(y_all, dlmForecasted_object$f, f_lower, f_upper)
+
+# Ignore the display of following codes
+
+# Plot results
+plot(y_union, plot.type = "single",
+     xlim = c(2010, 2016),
+     ylim = c( 385,  410), ylab = "", 
+     lty = c("solid", "solid", "dashed", "dashed"),
+     col = c("lightgray", "black", "black", "black"))
+
+# Legend
+legend(legend = c("Observations", "Mean (predictive distribution)", "95% intervals (predictive distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+```{r Code 9.6, collapse=TRUE}
+# <<Comparison of forecasts from 2015 among three models>>
+
+# Find the mean, 2.5%, and 97.5% values of the prediction values for each of models a, b, and c
+f_all <- lapply(list(dlmFiltered_obja, dlmFiltered_objb, dlmFiltered_objc),
+                function(x){
+  # Kalman prediction
+  dlmForecasted_object <- dlmForecast(mod = x, nAhead = 12)
+
+  # Find the standard deviation and the 2.5% and 97.5% values of the prediction value
+  f_sd <- sqrt(as.numeric(dlmForecasted_object$Q))
+  f_lower <- dlmForecasted_object$f + qnorm(0.025, sd = f_sd)
+  f_upper <- dlmForecasted_object$f + qnorm(0.975, sd = f_sd)
+  
+  # Combine the results
+  return(ts.union(
+     mean = dlmForecasted_object$f,
+    lower = f_lower,
+    upper = f_upper
+  ))
+})
+
+# Combine the prediction results for each model into ts class
+names(f_all) <- c("a", "b", "c")
+y_pred <- do.call("ts.union", f_all)
+
+# Extract 2015 data from the entire observation
+y_true <- window(y_all, start = 2015)
+
+# Ignore the display of following codes
+
+# Plot results
+plot(y_pred, plot.type = "single", type = "b",
+     xlab = "Time (2015)", xaxt = "n", ylab = "",
+     pch = c(rep("a", 3), rep("b", 3), rep("c", 3)),
+     lty = rep(c("solid", "dashed", "dashed"), 3),
+     col = rep(c("lightgray", "darkgray", "darkgray"), 3))
+lines(y_true)
+axis(side = 1, at = time(y_true), labels = 1:12)
+
+# Legend
+legend(legend = c("Observations", "Mean (predictive distribution)", "95% intervals (predictive distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("black", "lightgray", "darkgray"),
+       x = "bottomleft", cex = 0.6)
+```
+
+
+
+```{r Code 9.7, collapse=TRUE}
+# <<Comparison of MAPEs from 2015 among three models>>
+MAPE(true = y_true, pred = y_pred[, "a.mean"])
+MAPE(true = y_true, pred = y_pred[, "b.mean"])
+MAPE(true = y_true, pred = y_pred[, "c.mean"])
+```
+
+
+
+## ARMA model
+
+### Example: Japanese beer production
+
+```{r Code 9.8, collapse=TRUE}
+# <<Japanese beer production>>
+
+# Preprocessing
+library(dlm)
+
+# Load the data
+beer <- read.csv("BEER.csv")
+
+# Cast the data to ts class
+y <- ts(beer$Shipping_Volume, frequency = 12, start = c(2003, 1))
+
+# Plot
+plot(y)
+
+# Log-transform the data
+y <- log(y)
+
+# Plot log-transformed data
+plot(y, ylab = "log(y)")
+```
+
+
+#### Local-trend model + seasonal model (time-domain approach)
+
+```{r Code 9.9, collapse=TRUE}
+# <<Japanese beer production: local-trend model + seasonal model (time-domain approach)>>
+
+# Model setting: local-trend model + seasonal model (time-domain approach)
+build_dlm_BEERa <- function(par){
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[4]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_BEERa <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_BEERa)
+fit_dlm_BEERa
+
+# Set the maximum likelihood estimates of parameters in the model
+mod <- build_dlm_BEERa(fit_dlm_BEERa$par)
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations (log-transformed)")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+#### Local-level model + seasonal model (time-domain approach)
+
+```{r Code 9.10, collapse=TRUE}
+# <<Japanese beer production: local-level model + seasonal model (time-domain approach)>>
+
+# Model setting: local-level model + seasonal model (time-domain approach)
+build_dlm_BEERb <- function(par){
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# Ignore the display of following codes
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_BEERb <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_BEERb)
+fit_dlm_BEERb
+
+# Set the maximum likelihood estimates of parameters in the model
+mod <- build_dlm_BEERb(fit_dlm_BEERb$par)
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 2])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations (log-transformed)")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+#### Local-level model + seasonal model (time-domain approach) + ARMA model
+
+```{r Code 9.11, collapse=TRUE}
+# <<Japanese beer production: considering AR(1) component>>
+
+# Model setting: local-level model + seasonal model (time-domain approach) + AR(1) model
+build_dlm_BEERc <- function(par){
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2]))           +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, 10)), dV = 0) +
+    dlmModARMA(ar = ARtransPars(par[4]), sigma2 = exp(par[5]))
+  )
+}
+
+# Ignore the display of following codes
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_BEERc <- dlmMLE(y = y, parm = rep(0, 5), build = build_dlm_BEERc)
+fit_dlm_BEERc
+ARtransPars(fit_dlm_BEERc$par[4])
+
+# Set the maximum likelihood estimates of parameters in the model
+mod <- build_dlm_BEERc(fit_dlm_BEERc$par)
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+   mu <- dropFirst(dlmSmoothed_obj$s[,  1])
+gamma <- dropFirst(dlmSmoothed_obj$s[,  2])
+ arma <- dropFirst(dlmSmoothed_obj$s[, 13])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "log-Observations")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+ts.plot( arma, ylab = "AR(1) component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# Confirm the log-likelihood
+-dlmLL(y = y, mod = mod)
+```
+
+
+
+
+
+
+
+## Regression model
+
+### Example: Nintendo's stock price
+
+```{r Code 9.12, collapse=TRUE}
+# <<Nintendo's stock price>>
+
+# Preprocessing
+library(dlm)
+
+# Load the data
+NINTENDO <- read.csv("NINTENDO.csv")
+NINTENDO$Date <- as.Date(NINTENDO$Date)
+
+NIKKEI225 <- read.csv("NIKKEI225.csv")
+NIKKEI225$Date <- as.Date(NIKKEI225$Date)
+
+# Set observations and explanatory variables
+y      <- NINTENDO$Close
+x_dash <- NIKKEI225$Close
+
+# Ignore the display of following codes
+
+# Plot
+plot(x = NINTENDO$Date , y = y     , xlab = ""    , ylab = "",
+     ylim = c(10695, 28220), type = "l", col = "lightgray")
+par(new=T)
+plot(x = NIKKEI225$Date, y = x_dash, xlab = "Time", ylab = "",
+     ylim = c(10695, 28220), type = "l", lty = "dashed"   )
+
+# Legend
+legend(legend = c("Nintendo's stock price", "Nikkei stock average"),
+       lty = c("solid", "dashed"),
+       col = c("lightgray", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+```{r Code 9.13, collapse=TRUE}
+# <<Beta for Nintendo's stock price>>
+
+# Model setting: regression model
+build_dlm_REG <- function(par) {
+  dlmModReg(X = x_dash, dW = exp(par[1:2]), dV = exp(par[3]))
+}
+
+# Maximum likelihood estimation of parameters and confirmation of the results
+fit_dlm_REG <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_REG)
+fit_dlm_REG
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_REG(fit_dlm_REG$par)
+str(mod)
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Ignore the display of following codes
+
+# Find the mean and standard deviation of the smoothing distribution
+beta <- dropFirst(dlmSmoothed_obj$s[, 2])
+beta_sdev <- sqrt(dropFirst(
+               sapply(dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S), function(x){
+                 diag(x)[2]
+               })
+             ))
+
+# Find 2.5% and 97.5% values for 95% intervals of the smoothing distribution
+beta_quant <- list(beta + qnorm(0.025, sd = beta_sdev),
+                   beta + qnorm(0.975, sd = beta_sdev))
+
+# Plot results
+ plot(x = NINTENDO$Date, y = beta, type="l", ylim = c(0.5, 2.2),
+      xlab = "Time", ylab = "Beta value")
+lines(x = NINTENDO$Date, y = beta_quant[[1]], lty = "dashed")
+lines(x = NINTENDO$Date, y = beta_quant[[2]], lty = "dashed")
+
+# Legend
+legend(legend = c("Mean (smoothing distribution)", "95% intervals (smoothing distribution)"),
+       lty = c("solid", "dashed"),
+       col = c("black", "black"),
+       x = "topleft", cex = 0.6)
+
+# Reference event
+mtext("x", at = as.Date("2015/3/17"), side = 1, adj = 0.5, line = -0.5)
+mtext("x", at = as.Date("2016/7/6" ), side = 1, adj = 0.5, line = -0.5)
+mtext("x", at = as.Date("2016/7/22"), side = 1, adj = 0.5, line = -0.5)
+mtext("2015/3/17", at = as.Date("2015/3/17"), side = 1, adj = 0, cex = 0.6)
+mtext("2016/7/6" , at = as.Date("2016/7/6" ), side = 1, adj = 1, cex = 0.6)
+mtext("2016/7/22", at = as.Date("2016/7/22"), side = 1, adj = 0, cex = 0.6)
+```
+
+
+
+
+### Example: flow data of the Nile (considering the rapid decrease in 1899)
+
+```{r Code 9.14, collapse=TRUE}
+# <<Apply local-level model + regression model (intervention variable) to flow data of the Nile>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Flow data of the Nile
+y <- Nile
+t_max <- length(y)
+
+# Set the explanatory variable (intervention variable)
+x_dash <- rep(0, t_max)                  # All initial value 0s (no dam)
+x_dash[which(1899 <= time(y))] <- 1      # All 1s after 1899 (with dam)
+
+# Function building local-level model + regression model (intervention variable)
+build_dlm_DAM <- function(par) {
+  return(
+    dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2])) +
+    dlmModReg(X = x_dash, addInt = FALSE, dW = exp(par[3]), dV = 0)
+  )
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm_DAM <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_DAM)
+modtv <- build_dlm_DAM(fit_dlm_DAM$par)
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv)
+
+# Mean and variance of the smoothing distribution
+stv <- dropFirst(dlmSmoothed_obj$s)
+stv_var <- dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+stv_var <- stv_var[-1]
+
+# Mean for estimator
+s <- stv[, 1] + x_dash * stv[, 2]                       # Consider also x_dash
+
+# 95% intervals of level estimator (finding 2.5% and 97.5% values)
+coeff <- cbind(1, x_dash)
+s_sdev <- sqrt(sapply(seq_along(stv_var), function(ct){ # Consider covariance
+            coeff[ct, ] %*% stv_var[[ct]] %*% t(coeff[ct, , drop = FALSE])
+          }))           
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# Ignore the display of following codes
+
+# Plot
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        lty=c("solid", "solid", "dashed", "dashed"),
+        col=c("lightgray", "black", "black", "black"))
+
+# Legend
+legend(legend = c("Observations", "Mean", "95% intervals"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+
+### Example: family food expenditure (considering effects depending on the days of the week)
+
+```{r Code 9.15, collapse=TRUE}
+# <<Family expenditure (food)>>
+
+# Preprocessing
+library(dlm)
+
+# Load the data
+food <- read.csv("FOOD.csv")
+
+# Cast the data to ts class
+y <- ts(food$Expenditure, frequency = 12, start = c(2000, 1))
+
+# Plot
+plot(y)
+
+# Log-transform the data
+y <- log(y)
+
+# Plot log-transformed data
+plot(y, ylab = "log(y)")
+```
+
+
+
+
+```{r Figure 9.18, echo = FALSE, results='hide'}
+# <<Food expenditure analysis with local-trend model + seasonal model (time-domain approach)>>
+
+# Model setting: local-trend model + seasonal model (time-domain approach)
+build_dlm_FOODa <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm_FOODa <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_FOODa)
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_FOODa(fit_dlm_FOODa$par)
+-dlmLL(y = y, mod = mod)
+
+# Kalman filtering
+dlmSmoothed_obj  <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations (log-transformed)")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+```{r Figure 9.19, echo = FALSE, results='hide'}
+# <<Daily food expenditure>>
+
+# Load daily data (June 2009)
+food_day <- read.csv("FOOD_DAY.csv")
+food_day$Date <- as.Date(food_day$Date)
+
+# Display daily data (June 2009)
+plot(x = food_day$Date, y = food_day$Expenditure,
+     type = "l", xlab = "June 2009", ylab = "Daily food expenditure (yen)", xaxt = "n")
+axis(side = 1, at = food_day$Date, labels = FALSE)
+x_lab <- weekdays(food_day$Date, abbreviate = TRUE)
+x_lab[!(x_lab %in% c("Sat", "Sun"))] <- ""
+par(xpd = TRUE)
+text(labels =      x_lab, x = as.Date(food_day$Date), y = 1850, adj = c(0, 0.5), srt = -45)
+text(labels =  "1st day", x = as.Date( "2009-06-01"), y = 1850, adj = c(0, 0.5), srt = -45)
+text(labels = "30th day", x = as.Date( "2009-06-30"), y = 1850, adj = c(0, 0.5), srt = -45)
+par(xpd = FALSE)
+```
+
+
+
+
+```{r Code 9.16, collapse=TRUE}
+# <<Set explanatory variable (weekday effect)>>
+
+# User-defined function returning weekdays and holidays in Japan
+jholidays <- function(days){
+  # Use of is.jholiday()
+  library(Nippon)
+
+  # Obtain the day of the week
+  DOW <- weekdays(days)
+
+  # Consider Saturdays, Sundays, and other public holidays, including their compensations, as holidays
+  holidays <- (DOW %in% c("Saturday", "Sunday")) | is.jholiday(days)
+
+  # Overwrite the day of the week with "HOLIDAY" or "WEEKDAY"
+  DOW[ holidays] <- "Holiday"
+  DOW[!holidays] <- "Weekday"
+
+  return(DOW)
+}
+
+# Sequence of the date during the examination period
+days <- seq(from = as.Date("2000/1/1"), to = as.Date("2009/12/31"), by = "day")
+
+# Aggregate the number of weekdays or holidays for every month
+monthly <- table(substr(days, start = 1, stop = 7), jholidays(days))  
+
+# Explanatory variable (difference between the total number of weekdays and holidays in a month)
+x_dash_weekday <- monthly[, "Weekday"] - monthly[, "Holiday"]
+```
+
+
+
+```{r Code 9.17, collapse=TRUE}
+# <<Set explanatory variable (leap year effect)>>
+
+# Data length
+t_max <- length(y)
+
+# February in a leap year during the examination period
+LEAPYEAR_FEB <- (c(2000, 2004, 2008) - 2000)*12 + 2
+
+# Explanatory variable (February in a leap year only corresponds to 1)
+x_dash_leapyear <- rep(0, t_max)          # All initial value 0s
+x_dash_leapyear[LEAPYEAR_FEB] <- 1        # February in leap year corresponds to 1
+```
+
+
+
+```{r Code 9.18, collapse=TRUE}
+# <<Food expenditure analysis with local-level model + seasonal model (time-domain approach) + regression model>>
+
+# Bind explanatory variables (weekday and leap year effects)
+x_dash <- cbind(x_dash_weekday, x_dash_leapyear)
+
+# Function building local-level model + seasonal model (time-domain approach) + regression model
+build_dlm_FOODb <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2]))         +
+    dlmModSeas(frequency = 12, dW = c(0, rep(0, times = 10)), dV = 0) +
+    dlmModReg(X = x_dash, addInt = FALSE, dV = 0)
+  )
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm_FOODb <- dlmMLE(y = y, parm = rep(0, 2), build = build_dlm_FOODb)
+
+# Set the maximum likelihood estimates of parameters in the model
+mod  <- build_dlm_FOODb(fit_dlm_FOODb$par)
+-dlmLL(y = y, mod = mod)
+
+# Kalman filtering
+dlmSmoothed_obj  <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+    mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+ gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+beta_w <- dropFirst(dlmSmoothed_obj$s[, 13])[t_max]  # Time-invariant
+beta_l <- dropFirst(dlmSmoothed_obj$s[, 14])[t_max]  # Time-invariant
+
+# Confirmation of the results
+cat(beta_w, beta_l, "\n")
+
+# Mean of regression component
+reg <- x_dash %*% c(beta_w, beta_l)
+tsp(reg) <- tsp(y)
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "log-Observations")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+ts.plot(  reg, ylab = "Regression component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+
+# Pop LC_TIME
+Sys.setlocale("LC_TIME", old_lc_time)
+```

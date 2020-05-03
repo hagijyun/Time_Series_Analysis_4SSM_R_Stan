@@ -1,0 +1,102 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=6]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+# Batch solution for the linear Gaussian state-space model
+
+## Wiener filter
+
+
+
+## Example: AR(1) model case
+
+```{r Code 7.1, collapse=TRUE}
+# <<Wiener and Kalman smoothings for the AR(1) model>>
+
+# Preprocessing
+set.seed(23)
+library(dlm)
+
+# Setting of state space model including AR(1)
+W <- 1
+V <- 2
+phi <- 0.98    # AR(1) coefficient
+mod <- dlmModPoly(order = 1, dW = W, dV = V, C0 = 100)
+mod$GG[1, 1] <- phi
+
+# Generate observations using Kalman prediction
+t_max <- 100
+sim_data <- dlmForecast(mod = mod, nAhead = t_max, sampleNew = 1)
+y <- sim_data$newObs[[1]]
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+s <- dropFirst(dlmSmoothed_obj$s)
+
+# Winner smoothing
+# Set coefficients
+r <- V / W
+b <- 1/(r*phi) + 1/phi + phi
+beta <- (b - sqrt(b^2 - 4)) / 2
+
+# Supplement the minimum required dummy 0s before and after the finite observations
+y_expand <- c(rep(0, t_max - 1), y, rep(0, t_max - 1))
+
+# Execution of Winner smoothing
+d <- (1/phi - beta)*(phi - beta) / (1 - beta^2) *
+     filter(method = "convolution",
+       filter = beta^abs(-(t_max-1):(t_max-1)), x = y_expand
+     )
+
+# Remove dummy NAs from the result
+d <- d[!is.na(d)]
+
+# Plot results
+ts.plot(cbind(y, d, s),
+        lty = c("solid", "dashed", "solid"),
+        col = c("lightgray", "red", "blue"),
+        ylab = "")
+# Legend
+legend(legend = c("Observations", "Winner smoothing", "Kalman smoothing"),
+  lty = c("solid", "dashed", "solid"),
+  col = c("lightgray", "red", "blue"),
+  x = "topright", text.width = 17, cex = 0.6)
+```
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

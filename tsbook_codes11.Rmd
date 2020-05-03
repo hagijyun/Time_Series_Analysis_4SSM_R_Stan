@@ -1,0 +1,1612 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=10]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+# Sequential solution for general state-space model
+
+```{r Preload utility and user-defined functions, collapse=TRUE, include = FALSE}
+# <<Calculate the weighted quantile of particles (utility function distributed with library dlm)>>
+
+# quantile function for weighted particle clouds
+weighted.quantile <- function(x, w, probs)
+{
+  ## Make sure 'w' is a probability vector
+  if ((s <- sum(w)) != 1)
+    w <- w / s
+  ## Sort 'x' values
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  ## Evaluate cdf
+  W <- cumsum(w)
+  ## Invert cdf
+  tmp <- outer(probs, W, "<=")
+  n <- length(x)
+  quantInd <- apply(tmp, 1, function(x) (1 : n)[x][1])
+  ## Return
+  ret <- x[quantInd]
+  ret[is.na(ret)] <- x[n]
+  return(ret)
+}
+```
+
+
+## Particle filter
+
+```{r Figure 11.1, echo = FALSE, results='hide'}
+# <<Concept of particle filter>>
+
+set.seed(4521)
+l <- -3; u <- 7
+particles <- seq(from = l, to = u, by = 0.5)
+particles <- rnorm(n = length(particles), mean = particles, sd = 0.1)
+myfunc <- function(x){ dnorm(x)*0.75 + dnorm(x, mean = 5)*0.25 }
+
+w_max <- max(myfunc(particles)) + 0.01
+curve(myfunc(x), l, u, xlab = "", ylab = "", yaxs = "i", ylim = c(0, w_max),
+      col = "white", col.axis = "white", tcl = 0.0)
+par(new = TRUE)
+plot(particles, myfunc(particles), yaxs = "i", ylim = c(0, w_max), type = "h", lty = 2, 
+     ann = FALSE, axes = FALSE)
+points(particles, myfunc(particles), pch = 16, cex = 1.3)
+typical_x <- particles[5]; typical_y <- myfunc(typical_x)
+# lines(x = c(typical_x, typical_x), y = c(typical_x, typical_y), lty = 2)
+lines(x = c(       -5, typical_x), y = c(typical_y, typical_y), lty = 2)
+mtext("x", at = typical_x, side = 1, adj = 0.5, line = -0.5)
+mtext("x", at = typical_y, side = 2, adj = 0.5, line = -0.5)
+
+mtext(side = 1, line = 0.8, at = typical_x, text = "Realization", cex=1.0, family = "mono")
+mtext(side = 2, line = 0.8, at = typical_y, text = "Weight\n(Probability)"  , cex=1.0, family = "mono")
+text(x = typical_x, y = typical_y, adj=c(0.5, -0.8), srt = 0, labels = "Particle", cex=1.2, family = "sans")
+legend(x = "topright", legend = "Arbitrary distribution", pch = rep(-1, 1), lty = rep(-1, 1),
+       text.font = 2, cex = 1.5, bty = "n", adj = 0.0)
+```
+
+
+### Particle filtering
+
+```{r Example figure of particle degeneracy in 11.1.1, echo = FALSE, results='hide'}
+# <<Example of particle degeneracy>>
+
+# Setting of random seed
+set.seed(4521)
+
+# Sequence of realizations: 1, 2, ..., max
+max <- 1000
+x <- 1:max
+
+# One-time sampling with replacement
+x1 <- sample(x, replace = TRUE)
+col1 <- rgb(1, 0, 0, 0.5)
+
+# 200-times sampling with replacement
+for (it in 1:200){ x <- sample(x, replace = TRUE) }
+x200 <- x
+col200 <- rgb(0, 0, 1, 0.5)
+
+# Break points of histogram
+breaks_len <- 25
+breaks <- seq(from = 0, to = max, length.out = breaks_len)
+
+# Histogram
+hist(x1  , col = col1, breaks = breaks, 
+     xlim = c(0, max), ylim = c(0, 500), xlab = "Realization", ylab = "Frequency", main = "")
+hist(x200, col = col200, breaks = breaks, add = TRUE)
+abline(h = max/breaks_len, lty = "dashed")
+box()
+legend("topright", legend = c("25 equal divisions", "1 time resampling", "200 times resampling"),
+       cex = 0.6, col = c("black", col1, col200), lty = c(2, 1, 1), lwd = c(1, 5, 5))
+```
+
+
+
+```{r Figure 11.2, echo = FALSE, results='hide'}
+# <<Conceptual diagram of particle filtering>>
+
+# Preprocessing
+set.seed(123)
+oldpar <- par(no.readonly = TRUE)
+par(mfcol = c(4, 1))
+par(oma = c(2, 0, 2, 0)); par(mar = c(2, 0, 0, 0))
+
+x_length <- 200
+x_from <- -3; x_to <- 6
+y_min <- -0.1; y_max <- 0.4
+
+# Filtering distribution (t - 1)
+x_tick <- rnorm(n = x_length)
+dnorm1 <- function(x){ dnorm(x) }
+curve(dnorm1, from = x_from, to = x_to, xlim = c(x_from, x_to), ylim = c(y_min, y_max), ann = F, axes = F)
+points(x = x_tick, y = rep(y_min, x_length), pch = 4, col = "gray")
+
+# State transition
+mean2 <- 0 + 1; var2 <- 1 + 0.5
+x_tick <- x_tick + rnorm(n = x_length, mean = mean2, sd = sqrt(var2))
+dnorm2 <- function(x){ dnorm(x, mean = mean2, sd = sqrt(var2)) }
+curve(dnorm2, from = x_from, to = x_to, xlim = c(x_from, x_to), ylim = c(y_min, y_max), ann = F, axes = F)
+points(x = x_tick, y = rep(y_min, x_length), pch = 4, col = "gray")
+
+# Likelihood
+mean3 <- 3; var3 <- 0.3
+dnorm3 <- function(x){ dnorm(x, mean = mean3, sd = sqrt(var3)) }
+curve(dnorm3, from = x_from, to = x_to, xlim = c(x_from, x_to), ann = F, axes = F)
+
+# Filtering distribution (t)
+var4 <- 1 / (1/var2 + 1/var3); mean4 <- mean2 * var4/var2 + mean3 * var4/var3
+dnorm4 <- function(x){ dnorm(x, mean = mean4, sd = sqrt(var4)) }
+plot(0, type = "n", xlim = c(x_from, x_to), ylim = c(y_min, y_max), ann = F, axes = F)
+rle_res <- rle(sort(sample(x_tick, size = x_length, replace = TRUE, prob = dnorm4(x_tick))))
+rle_res <- cbind(rle_res$values, rle_res$lengths)
+for (ct in 1:nrow(rle_res)){
+  points(x = rep(rle_res[ct, 1], rle_res[ct, 2]), y = seq(from = y_min, length.out = rle_res[ct, 2], by = y_max/20), pch = 4, col = "gray")
+}
+par(new = TRUE)
+curve(dnorm4, from = x_from, to = x_to, xlim = c(x_from, x_to), ylim = c(y_min, dnorm4(mean4)), ann = F, axes = F)
+
+# Post-processing
+par(oldpar)
+```
+
+
+
+## State estimation with particle filter
+### Example: artificial local-level model
+#### Filtering
+
+
+```{r Code 11.1, collapse=TRUE}
+# <<Particle filtering (from scratch) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the index sequence for resampling at every time point
+k <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = mod$m0, sd = sqrt(mod$C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- 1 / N
+
+# Time-forward processing
+for (t in (1:t_max)+1){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, ], sd = sqrt(mod$W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- w[t-1, ] * dnorm(y[t], mean = x[t, ], sd = sqrt(mod$V))
+
+  # Normalization of weight
+  w[t, ] <- w[t, ] / sum(w[t, ])
+
+  # Resampling
+  
+  # Index sequence for resampling
+  k[, t] <- sample(1:N, prob = w[t, ], replace = TRUE, size = N)
+
+  # Particle (realizations): relabeling with the resampling index sequence
+  x[t, ] <- x[t, k[, t]]
+
+  # Particle (weight): reset
+  w[t, ] <- 1 / N
+}
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+k <- k[, -1, drop = FALSE]
+x <- x[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+# Find mean, 2.5%, and 97.5% values
+scratch_m       <- sapply(1:t_max, function(t){
+                     mean(x[t, ])
+                   })
+scratch_m_quant <- lapply(c(0.025, 0.975), function(quant){
+                     sapply(1:t_max, function(t){
+                       quantile(x[t, ], probs = quant)
+                     })
+                   })
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, m, scratch_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman filtering)",  "Mean (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", scratch_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman filtering)",  "95% intervals (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+#### Prediction
+
+
+```{r Code 11.2, collapse=TRUE}
+# <<Particle prediction (from scratch) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+
+# Append data area at the future time points
+x <- rbind(x, matrix(NA_real_, nrow = 10, ncol = N))
+w <- rbind(w, matrix(NA_real_, nrow = 10, ncol = N))
+
+# Time-forward processing
+for (t in t_max+(1:10)){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, ], sd = sqrt(mod$W))
+
+  # Update particle (weight)
+  w[t, ] <- w[t-1, ]
+}
+
+# Find mean, 2.5%, and 97.5% values
+scratch_a       <- sapply(t_max+(1:10), function(t){
+                     mean(x[t, ])
+                   })
+scratch_a_quant <- lapply(c(0.025, 0.975), function(quant){
+                     sapply(t_max+(1:10), function(t){
+                       quantile(x[t, ], probs = quant)
+                     })
+                   })
+
+# Ignore the display of following codes
+
+# Cast to ts class
+scratch_a <- ts(scratch_a, start = t_max+1)
+scratch_a_quant <- lapply(scratch_a_quant, function(dat){
+                     ts(dat, start = t_max+1)
+                   })
+
+# Plot results
+ts.plot(cbind(y, a, scratch_a),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman prediction)",  "Mean (particle prediction)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", a_quant), do.call("cbind", scratch_a_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman prediction)",  "95% intervals (particle prediction)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "bottomleft", text.width = 70, cex = 0.6)
+```
+
+
+
+
+#### Smoothing
+
+
+```{r Code 11.3, collapse=TRUE}
+# <<Particle smoothing (from scratch and Kitagawa algorithm) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+
+# User-defined function obtaining indices to reselect filtering particles considering future information
+smoothing_index <- function(t_current){
+  # Index sequence at current time t_current
+  index <- 1:N
+
+  # Virtual repetition of resampling from t_current + 1 to t_max
+  for (t in (t_current+1):t_max){     # Upper limitation leads to fixed-lag smoothing
+    index <- index[k[, t]]
+  }
+
+  # Return the final reselecting index from virtual repetition of resampling
+  return(index)
+}
+
+# Reselect filtering particles considering future information
+ki <- sapply(1:(t_max-1), function(t){ x[t, smoothing_index(t)] })
+ki <- t(cbind(ki, x[t_max, ]))        # Add smoothing distribution at the last time point
+
+# Find mean, 2.5%, and 97.5% values
+scratch_s         <- sapply(1:t_max, function(t){
+                       mean(ki[t, ])
+                     })
+scratch_s_quant   <- lapply(c(0.025, 0.975), function(quant){
+                       sapply(1:t_max, function(t){
+                         quantile(ki[t, ], probs = quant)
+                       })
+                     })
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, s, scratch_s),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant), do.call("cbind", scratch_s_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+
+```{r Code 11.4, collapse=TRUE}
+# <<Particle smoothing (from scratch and FFBSi algorithm) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+
+# Maximum value of trial (pass)
+path_max <- 500
+
+# Setting of the progress bar
+progress_bar <- txtProgressBar(min = 2, max = path_max, style = 3)
+
+# Smoothing particles (realizations)
+b  <- array(NA_real_, dim = c(t_max, N, path_max))
+
+# Smoothing particles (weight)
+rho  <- matrix(NA_real_, nrow = t_max, ncol = N)
+rho[t_max, ]  <- w[t_max, ]
+
+# By trial (pass)
+for (path in 1:path_max){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = path)
+
+  # Initialize realizations for smoothing distribution at t_max
+  b[t_max, , path] <- sample(x[t_max, ],
+                             prob = w[t_max, ], replace = TRUE, size = N)
+
+  # Time-reverse processing
+  for (t in (t_max-1):1){
+    # Weight
+    rho[t, ] <- w[t, ] * dnorm(b[t+1, , path], mean = x[t, ], sd = sqrt(mod$W))
+
+    # Normalization of weight
+    rho[t, ] <- rho[t, ] / sum(rho[t, ])
+
+    # Resampling
+
+    # Find indices to reselect filtering particles considering future information
+    FFBSi_index <- sample(1:N, prob = rho[t, ], replace = TRUE, size = N)
+
+    # Reselect filtering particles considering future information
+    b[t, , path] <- x[t, FFBSi_index]
+
+    # Reset weight
+    rho[t, ] <- 1 / N
+  }
+}
+
+# Find mean, 2.5%, and 97.5% values
+scratch_s         <- sapply(1:t_max, function(t){
+                       mean(b[t, ,])
+                     })
+
+scratch_s_quant   <- lapply(c(0.025, 0.975), function(quant){
+                       sapply(1:t_max, function(t){
+                         quantile(b[t, ,], probs = quant)
+                       })
+                     })
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, s, scratch_s),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant), do.call("cbind", scratch_s_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+
+
+
+
+```{r Figure 11.7, echo = FALSE, results='hide'}
+# <<Particle degeneracy in smoothing>>
+
+
+# Particle filtering for local-level model with known parameters (from scratch)
+
+# Preprocessing
+set.seed(4521)
+
+# Presetting of particle filter
+N <- 150                      # Number of particles
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the index sequence for resampling at every time point
+k <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = mod$m0, sd = sqrt(mod$C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- 1 / N
+
+# Time-forward processing
+for (t in (1:t_max)+1){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, ], sd = sqrt(mod$W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- w[t-1, ] * dnorm(y[t], mean = x[t, ], sd = sqrt(mod$V))
+
+  # Normalization of weight
+  w[t, ] <- w[t, ] / sum(w[t, ])
+
+  # Resampling
+  
+  # Index sequence for resampling
+  k[, t] <- sample(1:N, prob = w[t, ], replace = TRUE, size = N)
+
+  # Particle (realizations): relabeling with the resampling index sequence
+  x[t, ] <- x[t, k[, t]]
+
+  # Particle (weight): reset
+  w[t, ] <- 1 / N
+}
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+k <- k[, -1, drop = FALSE]
+x <- x[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+
+# Particle smoothing for local-level model with known parameters (from scratch with Kitagawa algorithm)
+
+# Preprocessing
+set.seed(4521)
+
+# User-defined function obtaining indices to reselect filtering particles considering future information
+smoothing_index <- function(t_current){
+  # Index sequence at current time t_current
+  index <- 1:N
+
+  # Virtual repetition of resampling from t_current + 1 to t_max
+  for (t in (t_current+1):t_max){     # Upper limitation leads to fixed-lag smoothing
+    index <- index[k[, t]]
+  }
+
+  # Return the final reselecting index from virtual repetition of resampling
+  return(index)
+}
+
+# Reselect filtering particles considering future information
+ki <- sapply(1:(t_max-1), function(t){ x[t, smoothing_index(t)] })
+ki <- t(cbind(ki, x[t_max, ]))        # Add smoothing distribution at the last time point
+
+# Find mean, 2.5%, and 97.5% values
+scratch_s         <- sapply(1:t_max, function(t){
+                       mean(ki[t, ])
+                     })
+scratch_s_quant   <- lapply(c(0.025, 0.975), function(quant){
+                       sapply(1:t_max, function(t){
+                         quantile(ki[t, ], probs = quant)
+                       })
+                     })
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant), do.call("cbind", scratch_s_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# Particle smoothing for local-level model with known parameters (from scratch with FFBSi algorithm)
+
+# Preprocessing
+set.seed(4521)
+
+# Maximum value of trial (path)
+path_max <- 500
+
+# Setting of the progress bar
+progress_bar <- txtProgressBar(min = 2, max = path_max, style = 3)
+
+# Smoothing particles (realizations)
+b  <- array(NA_real_, dim = c(t_max, N, path_max))
+
+# Smoothing particles (weight)
+rho  <- matrix(NA_real_, nrow = t_max, ncol = N)
+rho[t_max, ]  <- w[t_max, ]
+
+# By trial (path)
+for (path in 1:path_max){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = path)
+
+  # Initialize realizations for smoothing distribution at t_max
+  b[t_max, , path] <- sample(x[t_max, ], prob = w[t_max, ], replace = TRUE, size = N)
+
+  # Time-reverse processing
+  for (t in (t_max-1):1){
+    # Weight
+    rho[t, ] <- w[t, ] * dnorm(b[t+1, , path], mean = x[t, ], sd = sqrt(mod$W))
+
+    # Normalization of weight
+    rho[t, ] <- rho[t, ] / sum(rho[t, ])
+
+    # Resampling
+
+    # Find indices to reselect filtering particles considering future information
+    FFBSi_index <- sample(1:N, prob = rho[t, ], replace = TRUE, size = N)
+
+    # Reselect filtering particles considering future information
+    b[t, , path] <- x[t, FFBSi_index]
+
+    # Reset weight
+    rho[t, ] <- 1 / N
+  }
+}
+
+# Find mean, 2.5%, and 97.5% values
+scratch_s         <- sapply(1:t_max, function(t){
+                       mean(b[t, ,])
+                     })
+scratch_s_quant   <- lapply(c(0.025, 0.975), function(quant){
+                       sapply(1:t_max, function(t){
+                         quantile(b[t, ,], probs = quant)
+                       })
+                     })
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant), do.call("cbind", scratch_s_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (particle smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+### Attention to numerical computation
+
+#### Calculation in the log-domain 
+
+
+```{r Code 11.5, collapse=TRUE}
+# <<Logsumexp>>
+
+# Normalization in the linear domain (input value: unnormalized log vector, return value: normalized log vector)
+normalize <- function(l){
+  # Number for which the input log vector takes its maximum value
+  max_ind <- which.max(l)
+
+  # Suppress underflow as much as possible by applying scaling
+  return(
+    l - l[max_ind] -
+    log1p(sum(exp(l[-max_ind] - l[max_ind])))
+  )
+}
+```
+
+
+#### Resampling
+
+```{r Code 11.6, collapse=TRUE}
+# <<Systematic resampling>>
+
+# User-defined function for systematic resampling (N: number of particles, w: standardized log weight vector)
+sys_resampling <- function(N, w){
+  # Restore w to the linear domain value
+  w <- exp(w)
+  
+  # Define the step function returning the particle number according to the empirical cumulative distribution of the weight (y has one more element than x)
+  sfun <- stepfun(x = cumsum(w), y = 1:(N+1)) 
+
+  # Sampling at even interval (applying offset to all the quantiles with runif())
+  sfun((1:N - runif(n = 1)) / N)
+}
+```
+
+
+
+#### Improved version code
+
+
+```{r Code 11.7, collapse=TRUE}
+# <<Particle filtering (improved version) for local-level model with known parameters>>
+
+# Preprocessing
+set.seed(4521)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the index sequence for resampling at every time point
+k <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = mod$m0, sd = sqrt(mod$C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Time-forward processing
+for (t in (1:t_max)+1){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, ], sd = sqrt(mod$W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- w[t-1, ] +
+            dnorm(y[t], mean = x[t, ], sd = sqrt(mod$V), log = TRUE)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+
+  # Resampling
+  
+  # Index sequence for resampling
+  k[, t] <- sys_resampling(N = N, w = w[t, ])   # Systematic resampling
+
+  # Particle (realizations): relabeling with the resampling index sequence
+  x[t, ] <- x[t, k[, t]]
+
+  # Particle (weight): reset
+  w[t, ] <- log(1 / N)
+}
+
+# Ignore the display of following codes
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+k <- k[, -1, drop = FALSE]
+x <- x[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+# Find mean, 2.5%, and 97.5% values
+scratch_m       <- sapply(1:t_max, function(t){
+                     mean(x[t, ])
+                   })
+scratch_m_quant <- lapply(c(0.025, 0.975), function(quant){
+                     sapply(1:t_max, function(t){
+                       quantile(x[t, ], probs = quant)
+                     })
+                   })
+```
+
+
+
+## Use of library
+
+
+## Estimation example in general state-space model
+
+### Example: a well-known nonlinear benchmark model
+
+```{r Code 11.8, collapse=TRUE}
+# <<Well-known benchmark model>>
+
+# Preprocessing
+set.seed(23)
+library(dlm)
+
+# Set the parameters
+W <- 1
+V <- 2
+m0 <- 10
+C0 <- 9
+
+# Nonlinear function in state equation
+f <- function(x, t){
+  1/2 * x + 25 * x / (1 + x^2) + 8 * cos(1.2 * t)
+}
+
+# Nonlinear function in observation equation
+h <- function(x){
+  x^2 / 20
+}
+
+# Time series length
+t_max <- 100
+
+# Initialization of data (+1 considering prior distribution)
+x_true  <- rep(NA_real_, times = t_max + 1)
+     y  <- rep(NA_real_, times = t_max + 1)
+
+# Data generation
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+x_true[1] <- m0                 # Set mean to the realization from prior distribution
+for (it in (1:t_max)+1){        # Time update
+  # State equation
+  x_true[it] <- f(x_true[it - 1], it) + rnorm(n = 1, sd = sqrt(W))
+
+  # Observation equation
+  y[it]  <- h(x_true[it]) + rnorm(n = 1, sd = sqrt(V))
+}
+
+# Data formatting (removing the forefront corresponding to prior distribution)
+x_true <- x_true[-1]
+     y <-      y[-1]
+
+# Ignore the display of following codes
+
+# Plot
+ts.plot(cbind(y, x_true), ylim = c(-30, 20),
+        lty = c("solid", "solid"),
+        col=c("lightgray", "black"))
+
+# Legend
+legend(legend = c("Observations", "True state"),
+       lty = c("solid", "solid"),
+       col = c("lightgray", "black"),
+       x = "bottomleft", text.width = 15, cex = 0.6)
+
+# Save the results
+save(W, V, m0, C0, f, h, t_max, x_true, y, 
+     file = "BenchmarkNonLinearModel.RData")
+```
+
+
+
+```{r Figure 11.10, echo = FALSE, results='hide'}
+# <<Analyze a well-known benchmark model with local-level model>>
+
+# Setting of local-level model
+mod <- dlmModPoly(order = 1, dW = W, dV = V, m0 = m0, C0 = C0)
+
+# Kalman filtering
+dlmFiltered_obj <- dlmFilter(y = y, mod = mod)
+
+# Mean of the filtering distribution
+m <- dropFirst(dlmFiltered_obj$m)
+
+# Plot
+ts.plot(cbind(y, x_true, m), ylim = c(-30, 20), 
+        lty=c("solid", "solid", "dashed"),
+        col=c("lightgray", "black", "black"))
+
+# Legend
+legend(legend = c("Observations", "True state", "Mean (filtering distribution)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "bottomleft", text.width = 25, cex = 0.6)
+```
+
+
+
+
+### Application of a particle filter
+
+```{r Code 11.9, collapse=TRUE}
+# <<Particle filtering for a well-known nonlinear benchmark model>>
+
+# Preprocessing
+set.seed(4521)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the index sequence for resampling at every time point
+k <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = m0, sd = sqrt(C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Time-forward processing
+for (t in (1:t_max)+1){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = f(x = x[t-1, ], t = t), sd = sqrt(W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- w[t-1, ] +
+            dnorm(y[t], mean = h(x = x[t, ]), sd = sqrt(V), log = TRUE)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+
+  # Resampling
+  
+  # Index sequence for resampling
+  k[, t] <- sys_resampling(N = N, w = w[t, ])   # Systematic resampling
+
+  # Particle (realizations): relabeling with the resampling index sequence
+  x[t, ] <- x[t, k[, t]]
+
+  # Particle (weight): reset
+  w[t, ] <- log(1 / N)
+}
+
+# Ignore the display of following codes
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+k <- k[, -1, drop = FALSE]
+x <- x[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+# Find mean, 2.5%, and 97.5% values
+scratch_m       <- sapply(1:t_max, function(t){
+                     mean(x[t, ])
+                   })
+scratch_m_quant <- lapply(c(0.025, 0.975), function(quant){
+                     sapply(1:t_max, function(t){
+                       quantile(x[t, ], probs = quant)
+                     })
+                   })
+
+# Plot results
+ts.plot(cbind(y, x_true, scratch_m), ylim = c(-22, 19),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "True value of the state",  "Mean (particle filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "bottomleft", cex = 0.6)
+```
+
+
+
+
+
+
+```{r Figure 11.12, collapse=TRUE, include = FALSE}
+# <<Temporal transition of filtering distribution for a well-known benchmark model>>
+
+# Export data to MATLAB
+library(R.matlab)
+
+x_mat <- density(x[1, ], from = min(x), to = max(x))$x
+
+y_mat <- 1:t_max
+
+z_mat <- t(sapply(1:t_max, function(t){
+  density(x[t, ], from = min(x), to = max(x))$y
+}))
+
+writeMat("BenchmarkNonLinearModel_3Dplot.mat",
+         x  = x_mat , y  = y_mat, z  = z_mat,
+         x1 = x_true, y1 = y_mat, z1 = rep(0, t_max))
+
+# MATLAB code (begin)
+# load('BenchmarkNonLinearModel_3Dplot.mat')
+# h = waterfall(x,y,z)
+# set(h, 'FaceColor', 'flat');
+# set(h, 'FaceAlpha', 0.5);
+# set(h, 'EdgeColor', [0.5, 0.5 0.5]); % , 'LineWidth', 0.01);
+# set(gca,'YDir','reverse');
+# 
+# hold on;
+# 
+# line(x, repmat(16, 1, 512), z(16, :), 'LineWidth', 1.0, 'Color', [0.0 0.0 0.0 1.0]);
+# plot3(-20, 16, 0, 'Marker', 'o', 'MarkerFaceColor', 'black', 'MarkerEdgeColor', 'none', 'MarkerSize', 4)
+# text(-21, 16, 0, '16')
+# 
+# plot3(x1,y1,z1, 'LineStyle', '-', 'LineWidth', 2.5, 'Color', [1.0, 0.0, 0.0 1.0])
+# 
+# xlim([-20 21.0]); ylim([0 101])
+# xlabel('x', 'FontSize',14); ylabel('Time', 'FontSize',14)
+# daspect([85 142 5])
+# view(-110.3168, 36.3035)
+# 
+# print('Temporal transition of filtering distribution for a well-known benchmark model', '-r600', '-dpdf');
+# MATLAB code (end)
+```
+
+
+
+
+
+## Technique for improving estimation accuracy
+### Auxiliary particle filter
+#### Example: flow data of the Nile
+
+
+```{r Code 11.10, collapse=TRUE}
+# <<Apply local-level model to flow data of the Nile (particle filtering)>>
+
+# Preprocessing
+set.seed(4521)
+library(dlm)
+
+# Flow data of the Nile
+y <- Nile
+t_max <- length(y)
+
+# Function building local-level model
+build_dlm <- function(par) {
+  dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2]))
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm <- dlmMLE(y = y, parm = rep(0, 2), build = build_dlm)
+mod <- build_dlm(fit_dlm$par)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the value of effective sample size at every time point
+ESS <- rep(N, times = t_max+1)
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = mod$m0, sd = sqrt(mod$C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Time-forward processing: auxiliary particle filter
+for (t in (1:t_max)+1){
+  # (equivalent) Resampling
+
+  # Auxiliary variable sequence
+  probs <- w[t-1, ] + dnorm(y[t], mean = x[t-1, ], sd = sqrt(mod$V), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, k], sd = sqrt(mod$W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- dnorm(y[t], mean = x[t  ,  ], sd = sqrt(mod$V), log = TRUE) -
+            dnorm(y[t], mean = x[t-1, k], sd = sqrt(mod$V), log = TRUE)
+    
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+  
+  # Effective sample size
+  ESS[t] <- 1 / crossprod(exp(w[t, ]))
+}
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+  y <- ts(y[-1])
+ESS <- ts(ESS[-1])
+  x <- x[-1, , drop = FALSE]
+  w <- w[-1, , drop = FALSE]
+
+# Save effective sample size, and then calculate mean
+APF_ESS <- ESS
+APF_m <- sapply(1:t_max, function(t){ weighted.mean(x[t, ], w = exp(w[t, ])) })
+
+# Ignore the display of following codes
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the value of effective sample size at every time point
+ESS <- rep(N, times = t_max+1)
+
+# Setting of prior distribution
+
+# Particle (realizations)
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = mod$m0, sd = sqrt(mod$C0))
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Time-forward processing: bootstrap filter
+for (t in (1:t_max)+1){
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, ], sd = sqrt(mod$W))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- w[t-1, ] +
+            dnorm(y[t], mean = x[t, ], sd = sqrt(mod$V), log = TRUE)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+
+  # Effective sample size (obtaining before resampling)
+  ESS[t] <- 1 / crossprod(exp(w[t, ]))
+
+  # Resampling
+  
+  # Index sequence for resampling
+  k <- sys_resampling(N = N, w = w[t, ])
+
+  # Particle (realizations): relabeling with the resampling index sequence
+  x[t, ] <- x[t, k]
+
+  # Particle (weight): reset
+  w[t, ] <- log(1 / N)
+}
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+  y <- ts(y[-1])
+ESS <- ts(ESS[-1])
+  x <- x[-1, , drop = FALSE]
+  w <- w[-1, , drop = FALSE]
+
+# Save effective sample size, and then calculate mean
+BF_ESS <- ESS
+BF_m   <- sapply(1:t_max, function(t){ mean(x[t, ]) })
+
+
+# Plot results
+ts.plot(cbind(y, APF_m, BF_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (auxiliary particle filtering)",  "Mean (bootstrap filtering)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(APF_ESS, BF_ESS),
+        col = c("blue", "red"),
+        lty = c("solid", "dashed"))
+abline(h = N, col = "lightgray")
+
+# Legend
+legend(legend = c("Effective sample size (auxiliary particle filtering)",  "Effective sample size (bootstrap filtering)"),
+       lty = c("solid", "dashed"),
+       col = c("blue", "red"),
+       x = "bottomright", text.width = 50, cex = 0.6)
+```
+
+
+
+#### Usage in the Liu and West filter
+
+
+```{r Code 11.11, collapse=TRUE}
+# <<Kernel smoothing>>
+
+# User-defined function to perform artificial moving average for parameters
+kernel_smoothing <- function(realization, w, a){
+  # Restore w to the linear domain value
+  w <- exp(w)
+  
+  # Weighted mean and variance
+  mean_realization  <- weighted.mean( realization                      , w)
+   var_realization  <- weighted.mean((realization - mean_realization)^2, w)
+
+  # Mean and variance decrease through artificial moving average
+      mu <- a * realization + (1 - a) * mean_realization
+  sigma2 <- (1 - a^2) * var_realization
+
+  return(list(mu = mu, sigma = sqrt(sigma2)))
+}
+```
+
+
+
+
+```{r Code 11.12, collapse=TRUE}
+# <<Local-level model with known parameters (Liu and West filter)>>
+
+# Preprocessing
+set.seed(4521)
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+a <- 0.975                    # Exponential weight in artificial moving average for parameters
+W_max <- 10 * var(diff(y))    # Guess maximum value for parameter W
+V_max <- 10 * var(     y )    # Guess maximum value for parameter V
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Setting of prior distribution
+
+# Particle (realizations): parameter W
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))         # Log domain
+
+# Particle (realizations): parameter V
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))         # Log domain
+
+# Particle (realizations): state
+x <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+x[1, ] <- rnorm(N, mean = 0, sd = sqrt(1e+7))         # Prior distribution with unknown parameters
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Time-forward processing: kernel smoothing + auxiliary particle filter
+for (t in (1:t_max)+1){
+  # Artificial moving average for parameters
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # (equivalent) Resampling
+
+  # Auxiliary variable sequence
+  probs <- w[t-1, ] + 
+           dnorm(y[t], mean = x[t-1, ], sd = sqrt(exp(V_ks$mu)), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+
+  # Draw realizations of parameters from a continuous proposal distribution (refreshment)
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # State equation: generate particles (realizations)
+  x[t, ] <- rnorm(N, mean = x[t-1, k], sd = sqrt(exp(W[t, ])))
+
+  # Observation equation: updating particle (weight)
+  w[t, ] <- dnorm(y[t], mean = x[t  ,  ], sd = sqrt(exp(V[t,     ])), log = T) -
+            dnorm(y[t], mean = x[t-1, k], sd = sqrt(exp(V_ks$mu[k])), log = T)
+   
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+}
+
+# Ignore the display of following codes
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+W <- W[-1, , drop = FALSE]
+V <- V[-1, , drop = FALSE]
+x <- x[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+# Find mean, 2.5%, and 97.5% values
+LWF_W_m     <- sapply(1:t_max, function(t){exp(          # Transform to the linear domain
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.025, 0.975), function(quant){
+                 sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(          # Transform to the linear domain
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.025, 0.975), function(quant){
+                 sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_m       <- sapply(1:t_max, function(t){
+                 weighted.mean(x[t, ], w = exp(w[t, ]))
+               })
+LWF_m_quant <- lapply(c(0.025, 0.975), function(quant){
+                 sapply(1:t_max, function(t){
+                   weighted.quantile(x[t, ], w = exp(w[t, ]), probs = quant)
+                 })
+               })
+
+# Plot results
+ts.plot(cbind(y, m, LWF_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman filtering)",  "Mean (Liu and West filter)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 90, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", LWF_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman filtering)",  "95% intervals (Liu and West filter)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 90, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 10))
+abline(h = mod$W, col = "lightgray")
+mtext(sprintf("%d", mod$W), at = mod$W, side = 2, adj = 0, cex = 0.8)
+
+# Legend
+legend(legend = c("True value", "Mean value", "95% intervals"),
+       col = c("lightgray", "black", "black"),
+       lty = c("solid", "solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# Plot results
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 10))
+abline(h = mod$V, col = "lightgray")
+
+# Legend
+legend(legend = c("True value", "Mean value", "95% intervals"),
+       col = c("lightgray", "black", "black"),
+       lty = c("solid", "solid", "dashed"),
+       x = "topright", cex = 1.0)
+```
+
+
+
+
+
+
+### Case wherein the linear Gaussian state-space model is partially applicable
+
+
+```{r Code 11.13, collapse=TRUE}
+# <<Kalman filtering at one time point>>
+
+# User-defined function performing Kalman filtering for one time point
+Kalman_filtering <- function(y, state, param){
+  # Obtain the result for all particles initially (number of particles N is set to that in the parent environment)
+  res <- sapply(1:N, function(n){
+    # Model setting: mod in the parent environment is automatically copied as base
+    mod$m0 <-     state$m0[n]
+    mod$C0 <-     state$C0[n]
+    mod$W  <- exp(param$ W[n])    # W is the log domain value
+    mod$V  <- exp(param$ V[n])    # V is the log domain value
+
+    # Execute Kalman filtering for one time point
+    KF_out <- dlmFilter(y = y, mod = mod)
+
+    # Concatenate the required values
+    return(
+      c(
+        # Derivation of state (the mean and variance of filtering distribution)
+        m = KF_out$m[2],                              # "1" in the state corresponds to the prior distribution
+        C = dlmSvd2var(KF_out$U.C, KF_out$D.C)[[2]],  # "1" in the state corresponds to the prior distribution
+
+        # For the calculation of the one-step-ahead predictive likelihood
+        f = KF_out$f,
+        Q = mod$FF %*% dlmSvd2var(KF_out$U.R, KF_out$D.R)[[1]] %*% t(mod$FF) +
+            mod$V
+      )
+    )
+  })
+
+  # Integrate everything into a list for easy handling
+  return(list(m = res["m", ], C = res["C", ], f = res["f", ], Q = res["Q", ]))
+}
+```
+
+
+
+#### Application to the Liu and West filter
+
+
+```{r Code 11.14, collapse=TRUE}
+# <<Rao-Blackwellized Liu and West filter>>
+
+# Preprocessing
+set.seed(4521)
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+m_org <- m    # Save the existing variable m distinguished from new one for the mean in particles representing the filtering distribution
+
+# Presetting of particle filter
+N <- 1000                     # Number of particles
+a <- 0.975                    # Exponential weight in artificial moving average for parameters
+W_max <- 10 * var(diff(y))    # Guess maximum value for parameter W
+V_max <- 10 * var(     y )    # Guess maximum value for parameter V
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Setting of prior distribution
+
+# Particle (realizations): parameter W (log domain)
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))         # Log domain
+
+# Particle (realizations): parameter V (log domain)
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))         # Log domain
+
+# Particle (realizations): state (the mean and variance of the filtering distribution)
+m <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+m[1, ] <- 0                                           # Prior distribution with unknown parameters
+C <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+C[1, ] <- 1e+7                                        # Prior distribution with unknown parameters
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Setting of the progress bar
+progress_bar <- txtProgressBar(min = 2, max = t_max+1, style = 3)
+
+# Time-forward processing: kernel smoothing + auxiliary particle filter + Rao-Blackwellization
+for (t in (1:t_max)+1){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = t)
+
+  # Artificial moving average for parameters
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # (equivalent) Resampling
+
+  # Kalman filtering for one time point -> auxiliary variable sequence
+  KF_aux <- Kalman_filtering(y = y[t],
+                             state = list(m0 = m[t-1, ], C0 = C[t-1, ]),
+                             param = list(W = W_ks$mu, V = V_ks$mu)
+            )
+  probs <- w[t-1, ] +
+           dnorm(y[t], mean = KF_aux$f, sd = sqrt(KF_aux$Q), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+
+  
+  # Draw realizations of parameters from a continuous proposal distribution (refreshment)
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # State: Kalman filtering for one time point -> derivation of particles (realizations)
+  KF <- Kalman_filtering(y = y[t],
+                         state = list(m0 = m[t-1, k], C0 = C[t-1, k]),
+                         param = list(W = W[t, ], V = V[t, ])
+        )
+  m[t, ] <- KF$m
+  C[t, ] <- KF$C
+
+  # Update particle (weight)
+  w[t, ] <- dnorm(y[t], mean = KF$f       , sd = sqrt(KF$Q)       , log = T) -
+            dnorm(y[t], mean = KF_aux$f[k], sd = sqrt(KF_aux$Q[k]), log = T)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+}
+
+# Ignore the display of following codes
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+y <- ts(y[-1])
+W <- W[-1, , drop = FALSE]
+V <- V[-1, , drop = FALSE]
+m <- m[-1, , drop = FALSE]
+C <- C[-1, , drop = FALSE]
+w <- w[-1, , drop = FALSE]
+
+# Find mean, 2.5%, and 97.5% values
+LWF_W_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.025, 0.975), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.025, 0.975), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_m       <- sapply(1:t_max, function(t){
+                 weighted.mean(m[t, ], w = exp(w[t, ]))
+               })
+LWF_C_m     <- sapply(1:t_max, function(t){
+                 weighted.mean(C[t, ], w = exp(w[t, ])) 
+               })
+LWF_m_quant <- list(LWF_m + qnorm(0.025)*sqrt(LWF_C_m),
+                    LWF_m + qnorm(0.975)*sqrt(LWF_C_m)
+               )
+
+# Plot results
+ts.plot(cbind(y, m_org, LWF_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman filtering)",  "Mean (Rao-Blackwellized Liu and West filter)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 110, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", LWF_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman filtering)",  "95% intervals (Rao-Blackwellized Liu and West filter)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 110, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 10))
+abline(h = mod$W, col = "lightgray")
+mtext(sprintf("%d", mod$W), at = mod$W, side = 2, adj = 0, cex = 0.8)
+
+# Legend
+legend(legend = c("True value", "Mean value", "95% intervals"),
+       col = c("lightgray", "black", "black"),
+       lty = c("solid", "solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# Plot results
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 10))
+abline(h = mod$V, col = "lightgray")
+
+# Legend
+legend(legend = c("True value", "Mean value", "95% intervals"),
+       col = c("lightgray", "black", "black"),
+       lty = c("solid", "solid", "dashed"),
+       x = "topright", cex = 1.0)
+```
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

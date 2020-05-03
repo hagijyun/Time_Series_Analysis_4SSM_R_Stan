@@ -1,0 +1,528 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=3]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+
+
+# Quick tour of time series analysis
+
+## Confirmation of the purpose and data collection
+
+## Preliminary examination of data
+
+### Plot with horizontal axis as time
+
+```{r Code 4.1, collapse=TRUE}
+# <<Plot with the horizontal axis as time>>
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+
+# (a) Annual flow of the Nile
+plot(Nile)
+title(sub = "(a)", line = 4, family = "mono")
+
+# (b) CO2 concentration in the atmosphere
+# Load the data
+Ryori <- read.csv("CO2.csv")
+
+# Cast the data to ts class, truncating it by December 2014
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+y_CO2 <- y
+plot(y_CO2)
+title(sub = "(b)", line = 4, family = "mono")
+
+# (c) Quarterly gas consumption in the UK
+plot(UKgas)
+title(sub = "(c)", line = 4, family = "mono")
+
+# (d) Artificially-generated data from a nonlinear model
+load("BenchmarkNonLinearModel.RData")
+y_nonlinear <- ts(y)
+plot(y_nonlinear)
+title(sub = "(d)", line = 4, family = "mono")
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+
+```{r Figure 4.2, echo = FALSE}
+# <<Plot with the horizontal axis as time (log-transformed data)>>
+
+
+# (c) Quarterly gas consumption in the UK (log-transformed data)
+UKgas_log <- log(UKgas)
+plot(UKgas_log, main = "Log of (c)")
+```
+
+
+### Histogram and five-number summary
+
+```{r Code 4.2, collapse=TRUE}
+# <<Histogram and five number summary>>
+
+# Preprocessing regarding plot (saving the default settings for plot, and then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+
+# (a) Annual flow of the Nile
+hist(Nile, main = "", xlab = "Data Value")
+title(sub = "(a)", line = 4, family = "mono")
+summary(Nile)
+
+# (b) CO2 concentration in the atmosphere
+hist(y_CO2, main = "", xlab = "Data Value")
+title(sub = "(b)", line = 4, family = "mono")
+summary(y_CO2)
+
+# (c) Quarterly gas consumption in the UK
+hist(UKgas_log, main = "", xlab = "Data Value")
+title(sub = "(c)", line = 4, family = "mono")
+summary(UKgas_log)
+
+# (d) Artificially-generated data from a nonlinear model
+hist(y_nonlinear, main = "", xlab = "Data Value")
+title(sub = "(d)", line = 4, family = "mono")
+summary(y_nonlinear)
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+
+```{r Figure 4.4, echo = FALSE, results='hide'}
+# <<Outlier>>
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(1, 2), pty = "s"); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# Tokyo's average temperature in August of a particular year
+temperature_without_outl <- c(25.6, 25.6, 24.9, 25.1, 24.9, 25.7, 27.2, 28, 29.1, 30.2, 30.5, 30.6, 30.6, 30.2, 30.4, 29.6, 28.6, 27.9, 27.3, 27.3, 26.9, 26.5, 26.5)
+temperature_with_outl    <- c(25.6, 25.6, 24.9, 25.1, 24.9, 25.7, 27.2, 28, 29.1, 30.2, 30.5, 30.6, 30.6, 30.2, 30.4, 29.6, 28.6, 27.9, 27.3, 67.3, 26.9, 26.5, 26.5)
+
+# Plot
+ts.plot(temperature_with_outl, ylim = c(20, 40), type = "l", ylab = "Temperature (\u00B0C)")
+
+# Histogram and five number summary
+hist(temperature_with_outl, breaks = seq(from = 20, to = 80, by = 1), 
+     xlab = "Temperature (\u00B0C)", ylab = "Frequency", main = "")
+summary(temperature_with_outl)
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+
+```{r Code 4.3, collapse=TRUE}
+# <<Compensation for NA>>
+
+# (b) CO2 concentration in the atmosphere
+
+# Identification of NA location
+NA.point <- which(is.na(y_CO2))
+
+# Compensation for NA: arithmetic mean before and after the NA
+y_CO2[NA.point] <- (y_CO2[NA.point-1] + y_CO2[NA.point+1]) / 2
+```
+
+
+### Autocorrelation coefficient
+
+
+```{r Code 4.4, collapse=TRUE}
+# <<Autocorrelation coefficients>>
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+
+
+# (a) Annual flow of the Nile
+acf(Nile, main = "")
+title(sub = "(a)", line = 4, family = "mono")
+
+# (b) CO2 concentration in the atmosphere
+acf(y_CO2, main = "")
+title(sub = "(b)", line = 4, family = "mono")
+
+# (c) Quarterly gas consumption in the UK
+acf(UKgas_log, main = "")
+title(sub = "(c)", line = 4, family = "mono")
+
+# (d) Artificially-generated data from a nonlinear model
+acf(y_nonlinear, main = "")
+title(sub = "(d)", line = 4, family = "mono")
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+### Frequency spectrum
+
+#### Fundamentals on frequency
+
+
+```{r Figure 4.6, echo = FALSE, results='hide'}
+# <<Fourier series expansion>>
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+split.screen(rbind(c(0, 0.6, 0.75, 1   ),
+                   c(0, 0.6, 0.50, 0.75),
+                   c(0, 0.6, 0.25, 0.50),
+                   c(0, 0.6, 0   , 0.25)))
+
+# Tick values on the x-axis
+x_tick <- seq(from = 0, to = 2*pi, length.out = 1000)
+
+# Function drawing rectangular signal
+draw_rectangle <- function(){
+  lines(x = c(   0,    0), y = c( 0,  1))
+  lines(x = c(   0, 1*pi), y = c( 1,  1))
+  lines(x = c(1*pi, 1*pi), y = c( 1, -1))
+  lines(x = c(1*pi, 2*pi), y = c(-1, -1))
+  lines(x = c(2*pi, 2*pi), y = c(-1,  0))
+}
+
+# Fourier series expansion
+Fourie_series <- 0
+for (n in c(1, 3, 5, 7)){
+  screen((n+1)/2); par(oma = c(0, 0, 0, 0)); par(mar = c(1, 0, 0, 0))
+  
+  Fourie_series <- Fourie_series + 4/pi * sin(n * x_tick) / n
+  plot(x = x_tick, y = Fourie_series, ylim = c(-1.3, 1.3), 
+       type = "l", lty = "dashed", ann = FALSE, xaxt="n")
+  draw_rectangle()
+  axis(side = 1, at = 0:6, labels = FALSE, tcl = -0.2)
+  mtext(text = 0:6, at = 0:6, side = 1, line = 0, cex = 0.7)
+  legend("topright", legend = sprintf("Sum of %d sin()s", ceiling(n/2)), cex = 0.6)
+}
+
+# Post-processing regarding plot
+close.screen(all = TRUE)
+par(oldpar)
+```
+
+
+#### Frequency domain transform
+
+
+```{r Code 4.5, collapse=TRUE}
+# <<Frequency domain transform>>
+
+# User-defined function drawing frequency spectrum (tick: marking points on horizontal axis, unit: quantity between time points)
+plot.spectrum <- function(dat, lab = "", sub = "",
+                          y_max = 1, tick = c(8, 4), unit = 1){
+  # Frequency domain transform of data
+  dat_FFT <- abs(fft(as.vector(dat)))
+
+  # Preparation for display setting about horizontal axis (frequency)
+  data_len  <- length(dat_FFT)
+  freq_tick <- c(data_len, tick, 2)
+
+  # Plot data in the frequency domain
+  plot(dat_FFT/max(dat_FFT), type = "l", main = "",
+       ylab = "|Standardized frequency spectrum|", ylim = c(0, y_max),
+       xlab = sprintf("Frequency (1/%s)", lab), xlim = c(1, data_len/2), xaxt = "n")
+  title(sub = sub, line = 4, family = "mono")
+  axis(side = 1, at = data_len/freq_tick * unit + 1, 
+       labels = sprintf("1/%d", freq_tick), cex.axis = 0.7)
+}
+
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+
+# (a) Annual flow of the Nile
+plot.spectrum(       Nile, lab =   "Year", sub = "(a)")
+
+# (b) CO2 concentration in the atmosphere
+plot.spectrum(      y_CO2, lab =   "Month", sub = "(b)", tick = c(12, 6))
+
+# (c) Quarterly gas consumption in the UK
+plot.spectrum(  UKgas_log, lab =   "Month", sub = "(c)", tick = c(12, 6), unit = 3)
+
+# (d) Artificially-generated data from a nonlinear model
+plot.spectrum(y_nonlinear, lab = "Time point", sub = "(d)")
+
+# Ignore the display of following codes
+
+# Redraw with changing the scale of the vertical axis
+
+# (a) Annual flow of the Nile
+plot.spectrum(       Nile, lab =   "Year", sub = "(a)", y_max = 0.02)
+
+# (b) CO2 concentration in the atmosphere
+plot.spectrum(      y_CO2, lab =   "Month", sub = "(b)", y_max = 0.02,
+              tick = c(12, 6))
+
+# (c) Quarterly gas consumption in the UK
+plot.spectrum(  UKgas_log, lab =   "Month", sub = "(c)", y_max = 0.2 ,
+              tick = c(12, 6), unit = 3)
+
+# (d) Artificially-generated data from a nonlinear model
+plot.spectrum(y_nonlinear, lab = "Time point", sub = "(d)", y_max = 0.2 )
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+
+## Model definition
+
+```{r Figure 4.10, echo = FALSE, results='hide'}
+# <<Decomposition and residuals of time series data>>
+
+# Preprocessing
+set.seed(1234)
+oldpar <- par(no.readonly = TRUE)
+par(cex.lab = 1.0)
+par(mfrow = c(4, 3)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# Tick on the horizontal axis and noise
+x_tick <- seq(from = 0, to = 2*pi*5, length = 100)
+noise <- rnorm(n = 100) / 3
+
+# Level component
+plot.new()  # Dummy panel
+plot(x = x_tick, y = rep(10, 100),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "Level component", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = 0.3, cex = 0.5)
+plot.new()  # Dummy panel
+
+# Trend component
+plot.new()  # Dummy panel
+plot(x = x_tick, y = x_tick/10, ylim = c(0, 10),
+     type = "l", bty = "l", xaxs = "i", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "Trend component", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = 0.3, cex = 0.5)
+plot.new()  # Dummy panel
+
+# Seasonal components
+plot.new()  # Dummy panel
+plot(x = x_tick, y = sin(x_tick),
+     type = "l", bty = "l", xaxs = "r", yaxs = "r", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "Seasonal component", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = 0.3, cex = 0.5)
+plot.new()  # Dummy panel
+
+# Time series data
+plot(x = x_tick, y = 10 + x_tick/10 + sin(x_tick) + noise, ylim = c(5, 14),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "Time series data", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = 0.3, cex = 0.5)
+
+# Estimates
+plot(x = x_tick, y = 10 + x_tick/10 + sin(x_tick), ylim = c(5, 14),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "Estimates", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = 0.3, cex = 0.5)
+
+# Residuals
+plot(x = x_tick, y = noise, ylim = c(-3, 3),
+     type = "l", bty = "n", xaxs = "i", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+abline(v = 0, h = 0)
+mtext(text = "Residuals", side = 1, line = 1.5)
+mtext(text = "Time", side = 1, at = 10*pi, line = -1, cex = 0.5)
+
+# Post-processing
+par(oldpar)
+```
+
+
+## Specification of parameter values
+
+## Execution of filtering, prediction, and smoothing
+
+
+
+```{r Code 4.6, collapse=TRUE}
+# <<Holt-Winters method>>
+
+# (a) Annual flow of the Nile
+HW_Nile <- HoltWinters(Nile, beta = FALSE, gamma = FALSE)
+str(HW_Nile)
+
+# (b) CO2 concentration in the atmosphere
+HW_CO2 <- HoltWinters(y_CO2)
+
+# (c) Quarterly gas consumption in the UK
+HW_UKgas_log <- HoltWinters(UKgas_log)
+
+# (d) Artificial generated data from a nonlinear model
+HW_nonlinear <- HoltWinters(y_nonlinear, gamma = FALSE)
+
+# Plot the filtering value
+
+# Preprocessing regarding plot (saving the default settings for plot, and then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+mygray <- "#80808080"
+
+plot(HW_Nile     , main = "", col = mygray, col.predicted = "black",
+     lty.predicted = "dashed")
+title(sub = "(a)", line = 4, family = "mono")
+
+plot(HW_CO2      , main = "", col = mygray, col.predicted = "black",
+     lty.predicted = "dashed")
+title(sub = "(b)", line = 4, family = "mono")
+
+plot(HW_UKgas_log, main = "", col = mygray, col.predicted = "black",
+     lty.predicted = "dashed")
+title(sub = "(c)", line = 4, family = "mono")
+
+plot(HW_nonlinear, main = "", col = mygray, col.predicted = "black",
+     lty.predicted = "dashed")
+title(sub = "(d)", line = 4, family = "mono")
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+```{r Code 4.7, collapse=TRUE}
+# <<Holt-Winters method (per component)>>
+
+# (a) Annual flow of the Nile
+HW_out <- HW_Nile
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"], 
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "", cex.lab = 1.3, cex.axis = 1.5, mar = c(0, 5, 1, 1))
+
+# (b) CO2 concentration in the atmosphere
+HW_out <- HW_CO2
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+                 Season = HW_out$fitted[, "season"],
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "", cex.lab = 1.3, cex.axis = 1.5, mar = c(0, 5, 1, 1))
+
+# (c) Quarterly gas consumption in the UK
+HW_out <- HW_UKgas_log
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+                 Season = HW_out$fitted[, "season"],
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "", cex.lab = 1.3, cex.axis = 1.5, mar = c(0, 5, 1, 1))
+
+# (d) Artificially-generated data from a nonlinear model
+HW_out <- HW_nonlinear
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "", cex.lab = 1.3, cex.axis = 1.5, mar = c(0, 5, 1, 1))
+```
+
+
+```{r Code 4.8, collapse=TRUE}
+# <<Holt-Winters method (forecast)>>
+
+# (b) CO2 concentration in the atmosphere
+HW_predict <- predict(HW_CO2, n.ahead = 12)
+str(HW_predict)
+
+# Plot observations along with filtering and prediction values
+plot(HW_CO2, HW_predict, main = "Filtering and prediction with Holt-Winters method",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+
+# Plot observations in 2015 as well
+y_CO2_2015 <- window(y_all, start = 2015)
+lines(y_CO2_2015, col = mygray)
+```
+
+
+
+## Diagnostic checking for the results
+
+```{r Code 4.9, collapse=TRUE}
+# <<Diagnostic checking for the results (autocorrelation of residuals)>>
+
+# Preprocessing regarding plot (saving the default settings for plot, then changing them)
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2), oma = c(0, 0, 0, 0), mar = c(5, 3.5, 2, 1), mgp = c(2.5, 1, 0))
+
+acf(residuals(HW_Nile)     , main = "")
+title(sub = "(a)", line = 4, family = "mono")
+
+acf(residuals(HW_CO2)      , main = "")
+title(sub = "(b)", line = 4, family = "mono")
+
+acf(residuals(HW_UKgas_log), main = "")
+title(sub = "(c)", line = 4, family = "mono")
+
+acf(residuals(HW_nonlinear), main = "")
+title(sub = "(d)", line = 4, family = "mono")
+
+# Post-processing regarding plot
+par(oldpar)
+```
+
+
+```{r Code 4.10, collapse=TRUE}
+# <<Diagnostic checking for the results (prediction performance)>>
+
+# User-defined function for mean absolute percentage error (MAPE)
+MAPE <- function(true, pred){
+  mean(abs(pred - true) / true)
+}
+
+# The MAPE of the prediction value
+MAPE(true = y_CO2_2015, pred = HW_predict)
+```
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

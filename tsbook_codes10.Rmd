@@ -1,0 +1,746 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=9]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+
+# Batch solution for general state-space model
+
+## MCMC
+
+### MCMC Fundamentals
+```{r Figure 10.1, echo = FALSE, results='hide'}
+# Drawing a sample from one-dimensional standard normal distribution using the Metropolis method
+
+# Random seed
+set.seed(1234)
+
+# Iteration max
+I <- 150
+
+# Initialization
+theta <- rep(NA, I)
+theta[1] <- -0.5
+
+# Iteration
+for (i in 2:I){
+	theta_tilde <- rnorm(n = 1, mean = theta[i-1], sd = 0.1)
+	alpha <- dnorm(x = theta_tilde) / dnorm(x = theta[i-1])
+	if (alpha >= 1){
+		theta[i] <- theta_tilde
+	}else{
+			u <- sample(x = c(0, 1), size = 1, prob = c(1-alpha, alpha))
+			if (u == 1){	theta[i] <- theta_tilde	}
+			else{					theta[i] <- theta[i-1]	}
+	}
+}
+
+# Plot
+curve(dnorm, -1.5 ,1, ylim = c(0.1, 0.44), xlab = "Realizations", ylab = "Density")
+lines(theta, dnorm(x = theta) + seq(from = -0.05, to = 0.05, along.with = theta), col = "#80808080")
+points(theta[1], dnorm(x = theta[1]) -0.05, pch = 16)
+text(theta[1], dnorm(x = theta[1]) -0.05, adj = -0.25, labels = "Start")
+```
+
+
+
+```{r Figure 10.2, include = FALSE}
+# Drawing a sample from two-dimensional standard normal distribution using the Gibbs method
+
+# Load libraries
+library(mvtnorm)
+library(R.matlab)
+
+# Set the step size
+tick_num <- 30 + 1
+i_tick <- seq(from = -3, to = 3, by = 0.2) -> j_tick
+
+# Generate data
+mesh <- function(condition = "TRUE"){
+	# Initialization
+	x <- matrix(NA, nrow = tick_num, ncol = tick_num)
+	y <- matrix(NA, nrow = tick_num, ncol = tick_num)
+	z <- matrix(NA, nrow = tick_num, ncol = tick_num)
+
+	# Loop
+	for (i in seq_along(i_tick)){
+		for (j in seq_along(j_tick)){
+			if (eval(parse(text = condition))){
+					x[i, j] <- i_tick[i]
+					y[i, j] <- j_tick[j]
+					z[i, j] <- dmvnorm(c(x[i, j], y[i, j]))
+			}
+		}
+	}
+
+	# Unite into a return value
+	return(list(x = x, y = y, z = z))
+}
+
+# First plotting data
+res <- mesh()
+x1 <- res$x; y1 <- res$y; z1 <- res$z
+
+# Second plotting data
+res <- mesh(condition = "-1.2 <= i_tick[i]")
+x2 <- res$x; y2 <- res$y; z2 <- res$z
+
+# Third plotting data
+res <- mesh(condition = "-1 <= j_tick[j]")
+x3 <- res$x; y3 <- res$y; z3 <- res$z
+
+# Fourth plotting data
+res <- mesh(condition = "i_tick[i] < 1.6")
+x4 <- res$x; y4 <- res$y; z4 <- res$z
+
+# Save as Matlab data
+writeMat("mvnorm_3Dplot.mat",
+         x1  = x1  , y1  = y1, z1  = z1,
+         x2  = x2  , y2  = y2, z2  = z2,
+         x3  = x3  , y3  = y3, z3  = z3,
+         x4  = x4  , y4  = y4, z4  = z4)
+
+# MATLAB code (begin)
+# load('mvnorm_3Dplot.mat')
+# 
+# figure;
+# view(-38, 21);
+# result = mesh(x1, y1, z1, 'EdgeColor', [0.5 0.5 0.5]);
+# alpha(result, 0.7); xlim([-3 3]); ylim([-3 3]);
+# hold on;
+# plot3(-1.2, -3.0, 0, 'Marker', 'p', 'MarkerFaceColor', 'black', 'MarkerEdgeColor', 'black', 'MarkerSize', 9);
+# print('2D_normal_Gibbs_a', '-r600', '-dpdf');
+# 
+# figure;
+# view(-38, 21);
+# result = mesh(x2, y2, z2, 'EdgeColor', [0.5 0.5 0.5]);
+# alpha(result, 0.7); xlim([-3 3]); ylim([-3 3]);
+# hold on;
+# draw = 10;
+# h = waterfall(x2(1:draw,:), y2(1:draw,:), z2(1:draw,:));
+# set(h, 'FaceColor', [0.5 0.5 0.5]); set(h, 'FaceAlpha', 0.9); set(h, 'EdgeColor', [0.5 0.5 0.5]);
+# plot3([-3.0 -1.2], [-1 -1], [0            0], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3([-1.2 -1.2], [-1 -1], [0 z2(draw, 11)], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3(-3.0, -1.0, 0, 'Marker', 'p', 'MarkerFaceColor', 'black', 'MarkerEdgeColor', 'black', 'MarkerSize', 9);
+# print('2D_normal_Gibbs_b', '-r600', '-dpdf');
+# 
+# figure;
+# view(-38, 21);
+# result = mesh(x3, y3, z3, 'EdgeColor', [0.5 0.5 0.5]);
+# alpha(result, 0.7); xlim([-3 3]); ylim([-3 3]);
+# hold on;
+# draw = 11;
+# h = patch(x3(:,draw), y3(:,draw), z3(:,draw), 'w')
+# set(h, 'FaceColor', [0.5 0.5 0.5]); set(h, 'FaceAlpha', 0.9); set(h, 'EdgeColor', [0.5 0.5 0.5]);
+# plot3([ 1.4  1.4], [-3 -1], [0            0], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3([ 1.4  1.4], [-1 -1], [0 z3(23, draw)], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3(1.4, -3.0, 0, 'Marker', 'p', 'MarkerFaceColor', 'black', 'MarkerEdgeColor', 'black', 'MarkerSize', 9);
+# print('2D_normal_Gibbs_c', '-r600', '-dpdf');
+# 
+# figure;
+# view(-38, 21);
+# result = mesh(x4, y4, z4, 'EdgeColor', [0.5 0.5 0.5]);
+# alpha(result, 0.3); xlim([-3 3]); ylim([-3 3]);
+# hold on;
+# draw = 23;
+# h = waterfall(x4(draw:31,:), y4(draw:31,:), z4(draw:31,:));
+# set(h, 'FaceColor', [0.5 0.5 0.5]); set(h, 'FaceAlpha', 0.9); set(h, 'EdgeColor', [0.5 0.5 0.5]);
+# plot3([-3.0  1.4], [ 1  1], [0            0], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3([ 1.4  1.4], [ 1  1], [0 z3(draw, 21)], 'LineStyle', ':', 'LineWidth', 1.5, 'Color', [0 0 0])
+# plot3(-3.0, 1.0, 0, 'Marker', 'p', 'MarkerFaceColor', 'black', 'MarkerEdgeColor', 'black', 'MarkerSize', 9);
+# print('2D_normal_Gibbs_d', '-r600', '-dpdf');
+# MATLAB code (end)
+```
+
+
+
+### Notes on using the MCMC method
+```{r Figure 10.3, echo = FALSE, results='hide'}
+# <<Convergence example of Markov chain>>
+ 
+# Refer to https://rstudio-pubs-static.s3.amazonaws.com/29244_555e5b85c5ba49f384d4ab502dd96fae.html
+
+# Preprocessing
+require(rstan)
+set.seed(1234)
+
+# Non-convergence example
+non_converged_model <- "
+  parameters{
+    real a;
+    real b;
+  }
+
+  model{
+    0 ~ normal(a + b, 1);
+  }
+"
+stan_fit_tmp <- stan(model_code = non_converged_model, seed = 12343)
+stan_out_tmp <- rstan::extract(stan_fit_tmp, permuted = FALSE)[, , "a"]
+
+sample_min <- min(stan_out_tmp)
+sample_max <- max(stan_out_tmp)
+sample_len <- dim(stan_out_tmp)[1]
+sample_var <- dim(stan_out_tmp)[2]
+dens_len <- 512
+
+x_val <- density(stan_out_tmp[, 1], from = sample_min, to = sample_max)$x
+y_val <- sapply(1:sample_var, function(i){
+           density(stan_out_tmp[, i], from = sample_min, to = sample_max)$y
+         })
+
+split.screen(rbind(c(0, 0.7, 0, 1), c(0.7, 1, 0, 1)))
+chain <- c("dotted", "dashed", "blank", "solid")
+
+screen(1); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 2, 2, 1))
+for (i in c(1, 2, 4)){
+  if (i != 1){ par(new = TRUE) }
+  plot(stan_out_tmp[, i], type = "l", lty = chain[i], ann = FALSE, axes = FALSE,
+       xlim = c(1, sample_len), ylim = c(sample_min, sample_max))
+}
+axis(side = 1, xlim = c(1, sample_len))
+mtext(text = "Number of searching steps", side = 1, line = 3, cex = 1.3)
+mtext(text = "Sample value", side = 2, line = 1, cex = 1.3)
+legend("topright", legend = c("1st", "2nd", "3rd"), lty = chain[c(1, 2, 4)], cex = 0.9)
+
+screen(2); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 0, 2, 0))
+plot(0, type = "n", ann = FALSE, axes = FALSE,
+     xlim = c(min(y_val), max(y_val)*2.0), ylim = c(sample_min, sample_max*1.1))
+for (i in c(1, 2, 4)){
+  polygon(y = c(x_val, rev(x_val)), x = c(y_val[, i], rep(y_val[dens_len, i], dens_len)),
+          border = NA, col = rgb(0.5, 0.5, 0.5, 0.5))
+  lines(x = y_val[, i], y = x_val, lty = chain[i])
+}
+text(x = max(y_val), y = median(x_val), adj = c(0.5, -1), labels = "Distribution of interest", srt = -90, cex = 1.3)
+
+close.screen(all = TRUE)
+
+# Convergence example
+converged_model <- "
+  parameters{
+    real<lower=0> a;
+    real<lower=0> b;
+  }
+
+  model{
+    0 ~ normal(a + b, 1);
+  }
+"
+stan_fit_tmp <- stan(model_code = converged_model, seed = 12343)
+stan_out_tmp <- rstan::extract(stan_fit_tmp, permuted = FALSE)[, , "a"]
+
+sample_min <- min(stan_out_tmp)
+sample_max <- max(stan_out_tmp)
+sample_len <- dim(stan_out_tmp)[1]
+sample_var <- dim(stan_out_tmp)[2]
+dens_len <- 512
+
+x_val <- density(stan_out_tmp[, 1], from = sample_min, to = sample_max)$x
+y_val <- sapply(1:sample_var, function(i){
+           density(stan_out_tmp[, i], from = sample_min, to = sample_max)$y
+         })
+
+split.screen(rbind(c(0, 0.7, 0, 1), c(0.7, 1, 0, 1)))
+chain <- c("dotted", "dashed", "blank", "solid")
+
+screen(1); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 2, 2, 1))
+for (i in c(1, 2, 4)){
+  if (i != 1){ par(new = TRUE) }
+  plot(stan_out_tmp[, i], type = "l", lty = chain[i], ann = FALSE, axes = FALSE,
+       xlim = c(1, sample_len), ylim = c(sample_min, sample_max))
+}
+axis(side = 1, xlim = c(1, sample_len))
+mtext(text = "Number of searching steps", side = 1, line = 3, cex = 1.3)
+mtext(text = "Sample value", side = 2, line = 1, cex = 1.3)
+legend("topright", legend = c("1st", "2nd", "3rd"), lty = chain[c(1, 2, 4)], cex = 0.9)
+
+screen(2); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 0, 2, 0))
+plot(0, type = "n", ann = FALSE, axes = FALSE,
+     xlim = c(min(y_val), max(y_val)*2.0), ylim = c(sample_min, sample_max*1.1))
+for (i in c(1, 2, 4)){
+  polygon(y = c(x_val, rev(x_val)), x = c(y_val[, i], rep(y_val[dens_len, i], dens_len)),
+          border = NA, col = rgb(0.5, 0.5, 0.5, 0.5))
+  lines(x = y_val[, i], y = x_val, lty = chain[i])
+}
+text(x = max(y_val), y = median(x_val), adj = c(0.5, -1), labels = "Distribution of interest", srt = -90, cex = 1.3)
+
+close.screen(all = TRUE)
+```
+
+
+## State estimation with MCMC
+
+## Use of library
+
+### Various libraries
+
+### Example: artificial local-level model
+
+```{r Code 10.2, collapse=TRUE}
+# <<Smoothing for local-level model using MCMC (known parameters)>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-1.stan")
+
+# Smoothing: execution (sampling)
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 W = mod$W, V = mod$V, 
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("x"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+par(oldpar)
+tmp_tp <- traceplot(fit_stan, pars = c(sprintf("x[%d]", 100), "lp__"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+
+# Extract necessary sampling results
+stan_mcmc_out <- rstan::extract(fit_stan, pars = "x")
+str(stan_mcmc_out)
+
+# Calculate the mean, 2.5%, and 97.5% values while marginalizing
+s_mcmc <- colMeans(stan_mcmc_out$x)
+s_mcmc_quant <- apply(stan_mcmc_out$x, 2, FUN = quantile, probs=c(0.025, 0.975))
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_mcmc, col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_mcmc_quant[ "2.5%", ], col = "red", lty = "dashed")
+lines(s_mcmc_quant["97.5%", ], col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+
+## Estimation example in general state-space model
+
+```{r Code 10.4, collapse=TRUE}
+# <<Smoothing for local-level model using MCMC (unknown parameter)>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-2.stan")
+
+# Smoothing: execution (sampling)
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V", "x"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+
+# Ignore the display of following codes
+
+par(oldpar)
+tmp_tp <- traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+
+# Extract necessary sampling results
+stan_mcmc_out <- rstan::extract(fit_stan, pars = "x")
+
+# Calculate the mean, 2.5%, and 97.5% values while marginalizing
+s_mcmc <- colMeans(stan_mcmc_out$x)
+s_mcmc_quant <- apply(stan_mcmc_out$x, 2, FUN = quantile, probs=c(0.025, 0.975))
+
+# Plot results
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_mcmc, col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_mcmc_quant[ "2.5%", ], col = "red", lty = "dashed")
+lines(s_mcmc_quant["97.5%", ], col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+## Technique for improving estimation accuracy
+
+### Case in which the linear Gaussian state-space model is partially applicable
+
+### Example: artificial local-level model
+
+```{r Code 10.6, collapse=TRUE}
+# <<Smoothing for local-level model using MCMC (unknown parameters and use of Kalman filter)>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Load data on artificial local-level model
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-3.stan")
+
+# Smoothing: execution (sampling)
+dim(mod$m0) <- 1               # Set the explicit dimension in the case of only one element vector
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1), 
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+fit_stan
+tmp_tp <- traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+```
+
+
+
+
+```{r Code 10.7, collapse=TRUE}
+# <<Smoothing for local-level model using MCMC (state draw with FFBS)>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Extract necessary sampling results
+stan_mcmc_out <- rstan::extract(fit_stan, pars = c("W", "V"))
+
+# FFBS preprocessing: setting of MCMC iteration step and progress bar
+it_seq <- seq_along(stan_mcmc_out$V[, 1, 1])
+progress_bar <- txtProgressBar(min = 1, max = max(it_seq), style = 3)
+
+# FFBS main processing: draw of state
+x_FFBS <- sapply(it_seq, function(it){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = it)
+
+  # Set W and V values in the model
+  mod$W[1, 1] <- stan_mcmc_out$W[it, 1, 1]
+  mod$V[1, 1] <- stan_mcmc_out$V[it, 1, 1]
+
+  # FFBS execution
+  return(dlmBSample(dlmFilter(y = y, mod = mod)))
+})
+
+# FFBS post-processing: removal of x0 and transposition (row means time direction according to the output of Stan)
+x_FFBS <- t(x_FFBS[-1, ])
+
+# Calculate the mean, 2.5%, and 97.5% values while marginalizing
+s_FFBS <- colMeans(x_FFBS)
+s_FFBS_quant <- apply(x_FFBS, 2, FUN = quantile, probs=c(0.025, 0.975))
+
+# Ignore the display of following codes
+
+# Plot results
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_FFBS, col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# Plot results
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_FFBS_quant[ "2.5%", ], col = "red", lty = "dashed")
+lines(s_FFBS_quant["97.5%", ], col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% intervals (FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+
+
+### Example: monthly totals of car drivers in the UK killed or injured
+
+```{r Code 10.8, collapse=TRUE}
+# <<Monthly totals of car drivers in UK killed or injured: Kalman smoothing>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Log-transform the data and set the time series length
+y <- log(UKDriverDeaths)
+t_max <- length(y)
+
+# Plot with the horizontal axis as time
+plot(y)
+
+# Model template
+mod <- dlmModPoly(order = 1) + dlmModSeas(frequency = 12)
+
+# User-defined function to define and build a model
+build_dlm_UKD <- function(par) {
+  mod$W[1, 1] <- exp(par[1])
+  mod$W[2, 2] <- exp(par[2])
+  mod$V[1, 1] <- exp(par[3])
+
+  return(mod)
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm_UKD <- dlmMLE(y = y, parm = rep(0, times = 3), build = build_dlm_UKD)
+
+# Model setting and its confirmation
+mod <- build_dlm_UKD(fit_dlm_UKD$par)
+cat(diag(mod$W)[1:2], mod$V, "\n")
+
+# Smoothing processing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 2])
+
+# Plot results
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "Observations (log-transformed)")
+ts.plot(   mu, ylab = "Level component")
+ts.plot(gamma, ylab = "Seasonal component")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+
+```{r Code 10.10, collapse=TRUE}
+# <<Monthly totals of car drivers in UK killed or injured: state sampling with MCMC>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-4.stan")
+
+# Smoothing: execution (sampling)
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, m0 = mod$m0, C0 = mod$C0), 
+                     pars = c("W_mu", "W_gamma", "V"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+fit_stan
+tmp_tp <- traceplot(fit_stan, pars = c("W_mu", "W_gamma", "V"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+```
+
+
+
+
+```{r Code 10.12, collapse=TRUE}
+# <<Monthly totals of car drivers in UK killed or injured: no state sampling with MCMC>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-5.stan")
+
+# Smoothing: execution (sampling)
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1), 
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W_mu", "W_gamma", "V"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+fit_stan
+tmp_tp <- traceplot(fit_stan, pars = c("W_mu", "W_gamma", "V"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+
+# Confirm the mean of the marginal distribution as the estimation result
+cat(summary(fit_stan)$summary[   "W_mu", "mean"],
+    summary(fit_stan)$summary["W_gamma", "mean"],
+    summary(fit_stan)$summary[ "V[1,1]", "mean"], "\n")
+```
+
+
+
+
+```{r Code 10.13, collapse=TRUE}
+# <<Monthly totals of car drivers in UK killed or injured: state draw with FFBS>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Extract necessary sampling results
+stan_mcmc_out <- rstan::extract(fit_stan, pars = c("W_mu", "W_gamma", "V"))
+
+# FFBS preprocessing: setting of MCMC iteration step and progress bar
+it_seq <- seq_along(stan_mcmc_out$V[, 1, 1])
+progress_bar <- txtProgressBar(min = 1, max = max(it_seq), style = 3)
+
+# FFBS main processing: draw of state
+x_FFBS <- lapply(it_seq, function(it){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = it)
+
+  # Set W and V values in the model
+  mod$W[1, 1] <- stan_mcmc_out$W_mu[it]
+  mod$W[2, 2] <- stan_mcmc_out$W_gamma[it]
+  mod$V[1, 1] <- stan_mcmc_out$V[it, 1, 1]
+
+  # FFBS execution
+  return(dlmBSample(dlmFilter(y = y, mod = mod)))
+})
+
+# FFBS post-processing: removal of x0 and transposition (row means time direction according to the output of Stan)
+   x_mu_FFBS <- t(sapply(x_FFBS, function(x){ x[-1, 1] }))
+x_gamma_FFBS <- t(sapply(x_FFBS, function(x){ x[-1, 2] }))
+
+# Calculate the mean while marginalizing
+   mu_FFBS <- colMeans(   x_mu_FFBS)
+gamma_FFBS <- colMeans(x_gamma_FFBS)
+
+# Ignore the display of following codes
+
+# Cast to ts class
+   mu_FFBS <- ts(   mu_FFBS); tsp(   mu_FFBS) <- tsp(   mu)
+gamma_FFBS <- ts(gamma_FFBS); tsp(gamma_FFBS) <- tsp(gamma)
+
+# Plot results
+ts.plot(cbind(y, mu), col = c("lightgray", "blue"))
+lines(mu_FFBS, col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Observations", "Mean (Kalman smoothing)",  "Mean (FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright",  cex = 0.6)
+
+# Plot results
+ts.plot(gamma, col = "blue", ylab = "", ylim = c(-0.15, 0.31))
+lines(gamma_FFBS, col = "red", lty = "dashed")
+
+# Legend
+legend(legend = c("Mean (Kalman smoothing)",  "Mean (FFBS)"),
+       lty = c("solid", "dashed"),
+       col = c("blue", "red"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

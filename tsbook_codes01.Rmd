@@ -1,0 +1,77 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=0]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+# Introduction
+
+## What is time series analysis?
+
+
+```{r Figure 1.1, echo = FALSE, results='hide'}
+# <<Data on annual flow of the Nile (Chapter 1)>>
+
+# Display data contents 
+Nile
+
+# Plot the data
+plot(Nile)
+```
+
+
+```{r Figure 1.2, echo = FALSE, results='hide'}
+# <<Data on CO2 concentration in the atmosphere (Chapter 1)>>
+
+# Load the data
+Ryori <- read.csv("CO2.csv")
+
+# Cast the data to ts class, truncating it by December 2014
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# Display data contents 
+y
+
+# Plot the data
+plot(y)
+```
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

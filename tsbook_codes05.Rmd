@@ -1,0 +1,109 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=4]
+---
+
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+
+# State-space model
+
+
+## Stochastic model
+
+```{r Figure 5.1, include = FALSE}
+# <<Stochastic treatment for the data on annual flow of the Nile>>
+
+# Preprocessing
+library(dlm)
+
+# Function building local-level model
+build_dlm <- function(par) {
+  dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2]))
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm <- dlmMLE(y = Nile, parm = rep(0, 2), build = build_dlm)
+
+# Kalman filter
+dlmFiltered_obj <- dlmFilter(y = Nile, mod = build_dlm(fit_dlm$par))
+
+# Mean and variance of one-step-ahead likelihood
+m <- dlmFiltered_obj$f
+m_var <- as.numeric(dlmSvd2var(dlmFiltered_obj$U.R, dlmFiltered_obj$D.R))
+
+# Create plotting data
+
+# Grid points along observations (512 points)
+x_mat <- seq(from = min(Nile), to = max(Nile), length.out = 512)
+
+# Time direction
+y_mat <- time(Nile)
+
+# Probability density
+z_mat <- t(sapply(seq_along(Nile), function(t){
+           dnorm(x_mat, mean = m[t], sd = sqrt(m_var[t]))
+         }))
+
+# Export data to MATLAB
+library(R.matlab)
+writeMat("Nile_3Dplot.mat",
+         x  = x_mat  , y  = y_mat, z  = z_mat,
+         x1 = Nile  , y1 = y_mat, z1 = rep(0, length(Nile)))
+
+# MATLAB code (begin)
+# load('Nile_3Dplot.mat')
+# h = waterfall(x, y, z)
+# set(h, 'FaceColor', 'flat');
+# set(h, 'FaceAlpha', 0.2);
+# set(h, 'EdgeColor', [0.5, 0.5 0.5]);
+# set(gca,'YDir','reverse');
+# set(gca,'ZTickLabel','');
+# 
+# hold on;
+# plot3(x1, y1, z1, 'LineStyle', '-', 'LineWidth', 2.5, 'Color', [1.0, 0.0, 0.0 1.0])
+# xlim([450 1370]); ylim([1870 1970])
+# xlabel('Nile', 'FontSize', 14); ylabel('Time', 'FontSize', 14)
+# daspect([3000 100 0.1])
+# view(55.3, 49.2)
+# 
+# print('Stochastic treatment for the data on annual flow of the Nile', '-r600', '-dpdf');
+# MATLAB code (end)
+```
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```

@@ -1,0 +1,916 @@
+---
+title: "Code"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=11]
+---
+
+
+```{r For setup, echo = FALSE, include = FALSE}
+# Working directory... set your favorite
+setwd("C:/cygwin/home/hagijyun/C/ebook/edoc")
+
+# Character width in console output
+options(width = 84)
+
+# Plot-related settings
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # Exporting to PDF file
+  pdf(height = 7 / (4/3))
+
+  # Rasterize the font information
+  require(showtext)
+  showtext_begin()
+}
+```
+
+
+# Example of applied analysis in general state-space model
+
+
+```{r Preload utility and user-defined functions, collapse=TRUE, include = FALSE}
+# <<Preload utility and user-defined functions>>
+
+# quantile function for weighted particle clouds
+weighted.quantile <- function(x, w, probs)
+{
+  ## Make sure 'w' is a probability vector
+  if ((s <- sum(w)) != 1)
+    w <- w / s
+  ## Sort 'x' values
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  ## Evaluate cdf
+  W <- cumsum(w)
+  ## Invert cdf
+  tmp <- outer(probs, W, "<=")
+  n <- length(x)
+  quantInd <- apply(tmp, 1, function(x) (1 : n)[x][1])
+  ## Return
+  ret <- x[quantInd]
+  ret[is.na(ret)] <- x[n]
+  return(ret)
+}
+
+# User-defined function obtaining indices to reselect filtering particles considering future information
+smoothing_index <- function(t_current){
+  # Index sequence at current time t_current
+  index <- 1:N
+
+  # Virtual repetition of resampling from t_current + 1 to t_max
+  for (t in (t_current+1):t_max){     # Upper limitation leads to fixed-lag smoothing
+    index <- index[k[, t]]
+  }
+
+  # Return the final reselecting index from virtual repetition of resampling
+  return(index)
+}
+
+# Normalization in the linear domain (input value: unnormalized log vector, return value: normalized log vector)
+normalize <- function(l){
+  # Number where the input log vector takes its maximum value
+  max_ind <- which.max(l)
+
+  # Suppress underflow to the extent possible by applying scaling
+  return(
+    l - l[max_ind] -
+    log1p(sum(exp(l[-max_ind] - l[max_ind])))
+  )
+}
+
+# User-defined function for systematic resampling (N: number of particles, w: standardized log weight vector)
+sys_resampling <- function(N, w){
+  # Restore w to the linear domain value
+  w <- exp(w)
+  
+  # Define the step function returning the particle number according to the empirical cumulative distribution of the weight (y has one more element than x)
+  sfun <- stepfun(x = cumsum(w), y = 1:(N+1)) 
+
+  # Sampling at even interval (applying offset to the whole quantiles with runif ())
+  sfun((1:N - runif(n = 1)) / N)
+}
+
+# User-defined function to perform artificial moving average for parameters
+kernel_smoothing <- function(realization, w, a){
+  # Restore w to the linear domain value
+  w <- exp(w)
+  
+  # Weighted mean and variance
+  mean_realization  <- weighted.mean( realization                      , w)
+   var_realization  <- weighted.mean((realization - mean_realization)^2, w)
+
+  # Mean and variance decrease through artificial moving average
+      mu <- a * realization + (1 - a) * mean_realization
+  sigma2 <- (1 - a^2) * var_realization
+
+  return(list(mu = mu, sigma = sqrt(sigma2)))
+}
+
+# User-defined function performing Kalman filtering for one time point
+Kalman_filtering <- function(y, state, param){
+  # Obtain the result for all particles initially (number of particles N is set to that in the parent environment)
+  res <- sapply(1:N, function(n){
+    # Model setting: mod in the parent environment is automatically copied as base
+    mod$m0 <-     state$m0[n]
+    mod$C0 <-     state$C0[n]
+    mod$W  <- exp(param$ W[n])    # W the log domain value
+    mod$V  <- exp(param$ V[n])    # V the log domain value
+
+    # Execute Kalman filtering for one time point
+    KF_out <- dlmFilter(y = y, mod = mod)
+
+    # Concatenate the required values
+    return(
+      c(
+        # Derivation of state (the mean and variance of filtering distribution)
+        m = KF_out$m[2],                              # "1" in the state corresponds to the prior distribution
+        C = dlmSvd2var(KF_out$U.C, KF_out$D.C)[[2]],  # "1" in the state corresponds to the prior distribution
+
+        # For the calculation of the one-step-ahead predictive likelihood
+        f = KF_out$f,
+        Q = mod$FF %*% dlmSvd2var(KF_out$U.R, KF_out$D.R)[[1]] %*% t(mod$FF) +
+            mod$V
+      )
+    )
+  })
+
+  # Integrate everything into a list for easy handling
+  return(list(m = res["m", ], C = res["C", ], f = res["f", ], Q = res["Q", ]))
+}
+```
+
+
+
+## Consideration of structural change
+
+```{r Figure 12.1, echo = FALSE, results='hide'}
+# <<Flow data of the Nile (reproduced)>>
+
+plot(Nile)
+```
+
+
+## Approach using a Kalman filter (known change point)
+
+### Time-invariant model studied thus far
+
+```{r Figure 12.2, echo = FALSE, results='hide'}
+# <<Apply local-level model to flow data of the Nile (time-invariant Kalman filter)>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Flow data of the Nile
+y <- Nile
+t_max <- length(y)
+
+# Function building local-level model (time-invariant variance of state noise)
+build_dlm <- function(par){
+  dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2]))
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm <- dlmMLE(y = y, parm = rep(0, 2), build = build_dlm)
+mod <- build_dlm(fit_dlm$par)
+cat(mod$W, mod$V, "\n")
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# Mean of the smoothing distribution
+s <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, s),
+        lty=c("solid", "solid"),
+        col=c("lightgray", "black"))
+
+# Legend
+legend(legend = c("Observations", "Mean (time-invariant Kalman smoothing)"),
+       lty = c("solid", "solid"),
+       col = c("lightgray", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+### Utilizing prior information in the linear Gaussian state-space model
+
+### Numerical result
+
+
+```{r Code 12.1, collapse=TRUE}
+# <<Apply local-level model to flow data of the Nile (time-varying Kalman filter)>>
+
+# Preprocessing
+set.seed(123)
+library(dlm)
+
+# Flow data of the Nile
+y <- Nile
+t_max <- length(y)
+
+# Function building local-level model (time-varying variance of state noise)
+build_dlm <- function(par) {
+  tmp <- dlmModPoly(order = 1, dV = exp(par[1]))
+
+  # Variance of state noise refers to the first column of X
+  tmp$JW <- matrix(1, nrow = 1, ncol = 1)
+
+  # Store the variance of state noise in the first column of X
+  tmp$X <- matrix(exp(par[2]), nrow = t_max, ncol = 1)
+
+  # Allow increase of state noise only in 1899
+  j <- which(time(y) == 1899)
+  tmp$X[j, 1] <- tmp$X[j, 1] * exp(par[3])
+
+  return(tmp)
+}
+
+# Maximum likelihood estimation of parameters
+fit_dlm <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm)
+modtv <- build_dlm(fit_dlm$par)
+as.vector(modtv$X); modtv$V
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv)
+
+# Mean of the smoothing distribution
+stv <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, stv),
+        lty=c("solid", "solid"),
+        col=c("lightgray", "black"))
+
+# Legend
+legend(legend = c("Observations", "Mean (time-varying Kalman smoothing)"),
+       lty = c("solid", "solid"),
+       col = c("lightgray", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+## Approach using MCMC (unknown change point)
+
+### Time-invariant model studied thus far
+
+
+```{r Figure 12.4, echo = FALSE, results='hide'}
+# <<Apply local-level model to flow data of the Nile (time-invariant MCMC)>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model10-3.stan")
+
+# Smoothing: execution (sampling)
+dim(mod$m0) <- 1               # Set the explicit dimension in the case of only one element vector
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1),
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+par(oldpar)
+# tmp_tp <- traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+# tmp_tp + theme(aspect.ratio = 3/4)
+
+# Modify the model copied from Kalman filter
+mod_MCMC <- mod
+mod_MCMC$W[1, 1] <- summary(fit_stan)$summary["W[1,1]", "mean"]
+mod_MCMC$V[1, 1] <- summary(fit_stan)$summary["V[1,1]", "mean"]
+cat(mod_MCMC$W, mod_MCMC$V, "\n")
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod_MCMC)
+
+# Mean of the smoothing distribution
+s_MCMC <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, s_MCMC, s),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"))
+
+# Legend
+legend(legend = c("Observations", "Mean (Time-invariant MCMC)", "Mean (time-invariant Kalman smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+### Use of a horseshoe distribution in the general state-space model
+
+
+```{r Figure 12.5, echo = FALSE, results='hide'}
+# <<Frequency of horseshoe distribution>>
+
+set.seed(123)
+
+dLaplace <- function(x){ 1/2 * exp(-abs(x)) }
+
+sample_size <- 1e+5
+lambda <- abs(rcauchy(sample_size, location = 0, scale = 1))
+horseshoe <- rnorm(sample_size, sd = lambda * 1)
+
+breaks <- function(samples){
+  return(c(
+    c(min(samples), -3), seq(from = -3, to = 3, by = 0.1), c(3, max(samples))
+  ))
+}
+xlim <- c(-3, 3); ylim <- c(0, 0.6)
+
+#curve(dnorm(x),
+#      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i",
+#      xlab = "Realization", ylab = "Density")
+curve(dcauchy(x),
+      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i",
+      xlab = "Realization", ylab = "Density", lty = "solid")
+curve(dLaplace(x), add = TRUE,
+      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i", xlab = "", ylab = "",
+      lty = "dashed")
+hist(horseshoe, breaks = breaks(horseshoe), add = TRUE,
+     xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i", xlab = "", ylab = "",
+     col = "#80808040", border = "#80808040")
+
+legend(legend = c("Cauchy distribution", "Laplace distribution", "Horseshoe distribution"),
+       col = c("black", "black", "lightgray"),
+       lty = c("solid", "dashed", "solid"),
+       lwd = c(1, 1, 5),
+       x = "topright", cex = 0.7)
+```
+
+
+
+### Numerical result
+
+
+
+```{r Code 12.3, collapse=TRUE}
+# <<Apply local-level model to flow data of the Nile (time-varying MCMC: horseshoe prior)>>
+
+# Preprocessing
+set.seed(123)
+library(rstan)
+
+# Presetting of Stan: HDD storage of compiled code and parallel computation
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+# Model: generation and compilation
+stan_mod_out <- stan_model(file = "model12-1.stan")
+
+# Smoothing: execution (sampling)
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 miss = as.integer(is.na(y)),
+                                 m0 = modtv$m0, C0 = modtv$C0[1, 1]),
+                     pars = c("lambda", "W_sqrt", "V_sqrt"),
+                     seed = 123
+            )
+
+# Confirmation of the results
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+print(fit_stan, probs = c(0.025, 0.5, 0.975))
+par(oldpar)
+tmp_tp <- traceplot(fit_stan, pars = c("W_sqrt", "V_sqrt"), alpha = 0.5)
+tmp_tp + theme(aspect.ratio = 3/4)
+
+# Modify the model copied from Kalman filter
+modtv_MCMC <- modtv
+modtv_MCMC$X[ , 1] <- (summary(fit_stan)$summary[   1:100, "mean"] *
+                       summary(fit_stan)$summary["W_sqrt", "mean"])^2
+modtv_MCMC$V[1, 1] <- (summary(fit_stan)$summary["V_sqrt", "mean"])^2
+as.vector(modtv_MCMC$X); modtv_MCMC$V
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv_MCMC)
+
+# Mean of the smoothing distribution
+stv_MCMC <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, stv_MCMC, stv),
+        lty=c("solid", "solid", "dashed"),
+        col=c("lightgray", "blue", "red"))
+
+# Legend
+legend(legend = c("Observations", "Mean (time-varying MCMC: horseshoe distribution)", "Mean (time-varying Kalman smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+## Approach using a particle filter (unknown change point)
+
+### The time-invariant model studied thus far
+
+```{r Figures 12.8&9, echo = FALSE, results='hide'}
+# <<Apply local-level model to flow data of the Nile (time-invariant particle filter)>>
+
+# Preprocessing
+set.seed(123)
+
+# Presetting of particle filter
+N <- 1000                      # Number of particles
+a <- 0.975                    # Exponential weight in artificial moving average for parameters
+W_max <- 10 * var(diff(y))    # Guess maximum value for parameter W
+V_max <- 10 * var(     y )    # Guess maximum value for parameter V
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Setting of prior distribution
+
+# Particle (realizations): time-invariant component in the variance of state noise (log domain)
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))         # Log domain
+
+# Particle (realizations): parameter V (log domain)
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))         # Log domain
+
+# Particle (realizations): state (the mean and variance of the filtering distribution)
+m <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+m[1, ] <- mod$m0                                      # Prior distribution with unknown parameters
+C <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+C[1, ] <- mod$C0                                      # Prior distribution with unknown parameters
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Setting of the progress bar
+progress_bar <- txtProgressBar(min = 2, max = t_max+1, style = 3)
+
+# Time-forward processing: kernel smoothing + auxiliary particle filter + Rao-Blackwellization
+for (t in (1:t_max)+1){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = t)
+
+  # Artificial moving average for parameters
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # (equivalent) Resampling
+
+  # Kalman filtering for one time point -> auxiliary variable sequence
+  KF_aux <- Kalman_filtering(y = y[t],
+                             state = list(m0 = m[t-1, ], C0 = C[t-1, ]),
+                             param = list(W = W_ks$mu, V = V_ks$mu)
+            )
+  probs <- w[t-1, ] + dnorm(y[t], mean = KF_aux$f, sd = sqrt(KF_aux$Q), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+  
+  # Draw realizations of parameters from a continuous proposal distribution (refreshment)
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # State: Kalman filtering for one time point -> derivation of particles (realizations)
+  KF <- Kalman_filtering(y = y[t],
+                         state = list(m0 = m[t-1, k], C0 = C[t-1, k]),
+                         param = list(W = W[t, ], V = V[t, ])
+        )
+  m[t, ] <- KF$m
+  C[t, ] <- KF$C
+
+  # Update particle (weight)
+  w[t, ] <- dnorm(y[t], mean = KF$f       , sd = sqrt(KF$Q)       , log = TRUE) -
+            dnorm(y[t], mean = KF_aux$f[k], sd = sqrt(KF_aux$Q[k]), log = TRUE)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+}
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+      y <- ts(y[-1])
+      W <- W[-1, , drop = FALSE]
+      V <- V[-1, , drop = FALSE]
+      m <- m[-1, , drop = FALSE]
+      C <- C[-1, , drop = FALSE]
+      w <- w[-1, , drop = FALSE]
+
+# Find mean, 25%, and 75% values
+LWF_W_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+
+# Cast to ts class
+tsp(y) <- tsp(Nile)
+LWF_W_m <- ts(LWF_W_m); tsp(LWF_W_m) <- tsp(y)
+LWF_V_m <- ts(LWF_V_m); tsp(LWF_V_m) <- tsp(y)
+LWF_W_quant <- lapply(LWF_W_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+LWF_V_quant <- lapply(LWF_V_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+
+# Plot results
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 2e+4))
+
+# Legend
+legend(legend = c("Mean value", "50% intervals"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# Plot results
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 1e+5))
+
+# Legend
+legend(legend = c("Mean value", "50% intervals"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# Modify the model copied from Kalman filter
+mod_PF <- mod
+mod_PF$W[ , 1]  <- LWF_W_m[t_max]
+mod_PF$V[1, 1]  <- LWF_V_m[t_max]
+cat(mod_PF$W, mod_PF$V, "\n")
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod_PF)
+
+# Mean of the smoothing distribution
+s_PF <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, s_PF, s),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"))
+
+# Legend
+legend(legend = c("Observations", "Mean (time-invariant particle filter)", "Mean (time-invariant Kalman smoothing)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+### Use of a horseshoe distribution in the general state-space model
+
+### Numerical results
+
+
+```{r Code 12.4, collapse=TRUE}
+# <<Apply local-level model to flow data of the Nile (time-varying particle filter: horseshoe prior)>>
+
+# Preprocessing
+set.seed(123)
+
+# Presetting of particle filter
+N <- 10000                    # Number of particles
+a <- 0.975                    # Exponential weight in artificial moving average for parameters
+W_max <- 10 * var(diff(y))    # Guess maximum value for parameter W
+V_max <- 10 * var(     y )    # Guess maximum value for parameter V
+
+# *Note: Assuming that the time point of the prior distribution corresponds to one, we regard the shifted time points (from 2 to t_max+1) as the original ones (from 1 to t_max).
+
+# Data formatting (adding the forefront dummy corresponding to prior distribution)
+y <- c(NA_real_, y)
+
+# Save the index sequence for resampling at every time point
+k_save <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# Setting of prior distribution
+
+# Particle (realizations): variance of state noise (time-varying factor)
+lambda2      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+lambda2[1, ] <- log(rcauchy(N)^2)                       # Log domain (no actual impact on estimation)
+
+# Particle (realizations): variance of state noise (time-invariant base)
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))           # Log domain
+
+# Particle (realizations): parameter V (time-invariant)
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))           # Log domain
+
+# Particle (realizations): state (the mean and variance of the filtering distribution)
+m <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+m[1, ] <- modtv$m0                                      # Prior distribution with unknown parameters
+C <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+C[1, ] <- modtv$C0                                      # Prior distribution with unknown parameters
+
+# Particle (weight)
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# Setting of the progress bar
+progress_bar <- txtProgressBar(min = 2, max = t_max+1, style = 3)
+
+# Time-forward processing: kernel smoothing + auxiliary particle filter + Rao-Blackwellization
+for (t in (1:t_max)+1){
+  # Display progress bar
+  setTxtProgressBar(pb = progress_bar, value = t)
+
+  # Artificial moving average for parameters
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # (equivalent) Resampling
+
+  # Kalman filtering for one time point -> auxiliary variable sequence
+  KF_aux <- Kalman_filtering(y = y[t],
+                             state = list(m0 = m[t-1, ], C0 = C[t-1, ]),
+                             param = list(W = log(1)+W_ks$mu, V = V_ks$mu)
+            )
+  probs <- w[t-1, ] +
+           dnorm(y[t], mean = KF_aux$f, sd = sqrt(KF_aux$Q), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+  k_save[, t] <- k          # Save indices at every time point for particle smoothing (Kitagawa algorithm)
+
+  # Refresh all samples at each time point
+  lambda2[t, ] <- log(rcauchy(N)^2)
+
+  # Draw realizations of parameters from a continuous proposal distribution (refreshment)
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # State: Kalman filtering for one time point -> derivation of particles (realizations)
+  KF <- Kalman_filtering(y = y[t],
+                         state = list(m0 = m[t-1, k], C0 = C[t-1, k]),
+                         param = list(W = lambda2[t, ]+W[t, ], V = V[t, ])
+        )
+  m[t, ] <- KF$m
+  C[t, ] <- KF$C
+
+  # Update particle (weight)
+  w[t, ] <- dnorm(y[t], mean = KF$f       , sd = sqrt(KF$Q)       , log = T) -
+            dnorm(y[t], mean = KF_aux$f[k], sd = sqrt(KF_aux$Q[k]), log = T)
+
+  # Normalization of weight
+  w[t, ] <- normalize(w[t, ])
+}
+
+# Ignore the display of following codes
+
+# Result formatting: removing the forefront corresponding to prior distribution, etc.
+      y <- ts(y[-1])
+      k <-  k_save[, -1, drop = FALSE]
+lambda2 <- lambda2[-1, , drop = FALSE]
+      W <-       W[-1, , drop = FALSE]
+      V <-       V[-1, , drop = FALSE]
+      m <-       m[-1, , drop = FALSE]
+      C <-       C[-1, , drop = FALSE]
+      w <-       w[-1, , drop = FALSE]
+
+# Find mean, 25%, and 75% values
+LWF_W_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+
+# Cast to ts class
+tsp(y) <- tsp(Nile)
+LWF_W_m <- ts(LWF_W_m); tsp(LWF_W_m) <- tsp(y)
+LWF_V_m <- ts(LWF_V_m); tsp(LWF_V_m) <- tsp(y)
+LWF_W_quant <- lapply(LWF_W_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+LWF_V_quant <- lapply(LWF_V_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+
+# Plot results
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 2e+4))
+
+# Legend
+legend(legend = c("Mean value", "50% intervals"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# Plot results
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 1e+5))
+
+# Legend
+legend(legend = c("Mean value", "50% intervals"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+
+# Reselect filtering particles considering future information
+ki <- sapply(1:(t_max-1), function(t){ lambda2[t, smoothing_index(t)] })
+ki <- t(cbind(ki, lambda2[t_max, ]))        # Add smoothing distribution at the last time point
+
+# Find mean, 25%, and 75% values
+LWF_lambda2_s     <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                       weighted.mean(ki[t, ], w = exp(w[t, ]))
+                     )})
+LWF_lambda2_quant <- lapply(c(0.25, 0.75), function(quant){
+                       sapply(1:t_max, function(t){exp(      # Transform to the linear domain
+                         weighted.quantile(ki[t, ], w = exp(w[t, ]), probs = quant)
+                       )})
+                     })
+
+# Cast to ts class
+LWF_lambda2_s <- ts(LWF_lambda2_s); tsp(LWF_lambda2_s) <- tsp(y)
+LWF_lambda2_quant <- lapply(LWF_lambda2_quant, function(x){
+                       tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+                    })
+
+# Plot results
+ts.plot(cbind(LWF_lambda2_s, do.call("cbind", LWF_lambda2_quant)),
+        ylab = "Time-varying factor to W", ylim = c(0, 30),
+        lty = c("solid", "dashed", "dashed"),
+        col = c("black", "gray", "gray"))
+abline(h = 1, col = "lightgray", lty = "solid")
+mtext("1", at = 1, side = 2, cex = 0.6)
+points(1899, LWF_lambda2_s[time(LWF_lambda2_s) == 1899], pch = 1)
+points(1916, LWF_lambda2_s[time(LWF_lambda2_s) == 1916], pch = 1)
+lines(x = c(1899, 1899), y = c(-2, LWF_lambda2_s[time(LWF_lambda2_s) == 1899]),
+      lty = "dotted", col = "lightgray")
+lines(x = c(1916, 1916), y = c(-2, LWF_lambda2_s[time(LWF_lambda2_s) == 1916]),
+      lty = "dotted", col = "lightgray")
+mtext("1899", at = 1899, side = 1, adj = 1  , cex = 0.6)
+mtext("1916", at = 1916, side = 1, adj = 0.5, cex = 0.6)
+
+# Legend
+legend(legend = c("Mean", "50% intervals"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+
+# Modify the model copied from Kalman filter
+modtv_PF <- modtv
+modtv_PF$X[ , 1]  <- LWF_lambda2_s * LWF_W_m[t_max]
+modtv_PF$V[1, 1]  <- LWF_V_m[t_max]
+as.vector(modtv_PF$X); modtv_PF$V
+
+# Kalman smoothing
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv_PF)
+
+# Mean of the smoothing distribution
+stv_PF <- dropFirst(dlmSmoothed_obj$s)
+
+# Plot
+ts.plot(cbind(y, stv_PF, stv),
+        lty=c("solid", "solid", "dashed"),
+        col=c("lightgray", "blue", "red"))
+
+# Legend
+legend(legend = c("Observations", "Mean (time-varying particle filter: horseshoe distribution)", "Mean (time-varying Kalman filter)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+
+## Real-time detection for an unknown change point
+
+
+```{r Code 12.5, collapse=TRUE}
+# <<Fixed-lag smoothing in particle filter>>
+
+# User-defined function obtaining indices to reselect filtering particles considering future information
+smoothing_index <- function(t_current, lag_val){
+  # Index sequence at current time t_current
+  index <- 1:N
+
+  # Virtual repetition of resampling from t_current + 1 to t_current + lag_val
+  for (t in (t_current+1):ifelse(t_current + lag_val <= t_max,
+                                 t_current + lag_val,   t_max)){
+    index <- index[k[, t]]
+  }
+
+  # Return the final reselecting index from virtual repetition of resampling
+  return(index)
+}
+```
+
+
+
+
+```{r Figure 12.13, echo = FALSE, results='hide'}
+# <<Apply local-level model to flow data of the Nile (comparison among fixed-lag smoothings)>>
+
+# Filtering
+# Find mean
+LWF_lambda2_m <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                   weighted.mean(lambda2[t, ], w = exp(w[t, ]))
+                 )})
+
+# Cast to ts class
+LWF_lambda2_m <- ts(LWF_lambda2_m); tsp(LWF_lambda2_m) <- tsp(y)
+
+
+# Fixed-lag smoothing (lag = 1, 2, and 3)
+LWF_lambda2_s_lag <- lapply(1:3, function(lag){
+  # Reselect filtering particles considering future information
+  ki <- sapply(1:(t_max-1), function(t){ lambda2[t, smoothing_index(t, lag_val = lag)] })
+  ki <- t(cbind(ki, lambda2[t_max, ]))        # Add smoothing distribution at the last time point
+
+  # Find mean
+  LWF_lambda2_s <- sapply(1:t_max, function(t){exp(        # Transform to the linear domain
+                     weighted.mean(ki[t, ], w = exp(w[t, ]))
+                   )})
+
+  # Cast to ts class
+  LWF_lambda2_s <- ts(LWF_lambda2_s); tsp(LWF_lambda2_s) <- tsp(y)
+
+  # Return the results
+  return(LWF_lambda2_s)
+})
+
+# Unite the analysis results
+LWF_lambda2 <-do.call("ts.union", c(list(LWF_lambda2_m), LWF_lambda2_s_lag))
+
+# Plot results
+matplot(LWF_lambda2,
+        xaxt = "n", xlab = "Time", ylab = "Time-varying factor to W", ylim = c(0, 14.5),
+        lty = c("dashed", "dashed", "dashed", "dashed"),
+        col = c("gray", "gray", "gray", "black"),
+        type = "o", pch = as.character(0:3), cex = 0.7)
+x_tick <- seq(from = 1, to = nrow(LWF_lambda2), by = 15)
+axis(side = 1, labels = time(LWF_lambda2)[x_tick], at = x_tick)
+mtext("1899", at = which(time(LWF_lambda2) == 1899), side = 1, adj = 1, cex = 0.6)
+abline(h = 1, col = "lightgray", lty = "solid")
+mtext("1", at = 1, side = 2, cex = 0.6)
+
+# Legend
+legend(legend = c("Filtering",
+                  "Fixed-lag smoothing (lag = 1)",
+                  "Fixed-lag smoothing (lag = 2)",
+                  "Fixed-lag smoothing (lag = 3)"),
+       pch = as.character(0:3),
+       lty = c("dashed", "dashed", "dashed", "dashed"),
+       col = c("gray", "gray", "gray", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+```{r Post-processing for pdf plot, echo = FALSE, include = FALSE}
+# <<Post-processing for pdf plot>>
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext_end()
+
+  dev.off()
+}
+```
