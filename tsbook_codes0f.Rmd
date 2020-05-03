@@ -3,7 +3,7 @@ title: "Code"
 output:
   html_document:
     number_section: true
-    pandoc_args: [--number-offset=0]
+    pandoc_args: [--number-offset=-1]
 ---
 
 
