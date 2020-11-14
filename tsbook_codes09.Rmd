@@ -803,11 +803,11 @@ plot(x = food_day$Date, y = food_day$Expenditure,
      type = "l", xlab = "June 2009", ylab = "Daily food expenditure (yen)", xaxt = "n")
 axis(side = 1, at = food_day$Date, labels = FALSE)
 x_lab <- weekdays(food_day$Date, abbreviate = TRUE)
-x_lab[!(x_lab %in% c("Sat", "Sun"))] <- ""
+x_lab[!(x_lab %in% c("Sat", "Sun"))] <- ""; x_lab <- gsub("([tn])", "\\1.", x_lab)
 par(xpd = TRUE)
-text(labels =      x_lab, x = as.Date(food_day$Date), y = 1850, adj = c(0, 0.5), srt = -45)
-text(labels =  "1st day", x = as.Date( "2009-06-01"), y = 1850, adj = c(0, 0.5), srt = -45)
-text(labels = "30th day", x = as.Date( "2009-06-30"), y = 1850, adj = c(0, 0.5), srt = -45)
+text(labels =  x_lab, x = as.Date(food_day$Date), y = 1850, adj = c(0, 0.5), srt = -45)
+text(labels =  "1st", x = as.Date( "2009-06-01"), y = 1850, adj = c(0, 0.5), srt = -45)
+text(labels = "30th", x = as.Date( "2009-06-30"), y = 1850, adj = c(0, 0.5), srt = -45)
 par(xpd = FALSE)
 ```
 

@@ -414,7 +414,7 @@ legend(legend = c("Observations", "95% intervals (Kalman smoothing)",  "95% inte
 # Preprocessing
 set.seed(4521)
 
-# Maximum value of trial (pass)
+# Maximum value of trial (path)
 path_max <- 500
 
 # Setting of the progress bar
@@ -427,7 +427,7 @@ b  <- array(NA_real_, dim = c(t_max, N, path_max))
 rho  <- matrix(NA_real_, nrow = t_max, ncol = N)
 rho[t_max, ]  <- w[t_max, ]
 
-# By trial (pass)
+# By trial (path)
 for (path in 1:path_max){
   # Display progress bar
   setTxtProgressBar(pb = progress_bar, value = path)
