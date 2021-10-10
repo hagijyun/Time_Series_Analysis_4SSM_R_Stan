@@ -57,15 +57,15 @@ curve(dgamma(x, rate   = 1  , shape  = 2  ),  0, 10, xlab = "Realization", ylab 
 rate <- 1; shape <- 2
 curve(dgamma(x, rate = rate, shape = shape), 0, 10, xlab = "Realization", ylab = "Density")
 
-g_mean <- rate * shape
-g_sd   <- sqrt(rate * shape^2)
+g_mean <- shape / rate
+g_sd   <- sqrt(shape / (rate^2))
 
 lines(c(g_mean, g_mean), c(0, dgamma(x = g_mean, rate = rate, shape = shape)),
       lty = "dotdash")
 text(x = g_mean, y = 0, adj = c(-0.4, 0), labels = "Mean")
-lines(c(g_mean, g_mean+g_sd), c(0.07, 0.07),
+lines(c(g_mean, g_mean+g_sd), c(0.11, 0.11),
       lty = "dashed")
-text(x = g_mean, y = 0.07, adj = c(-0.2, 1.4), labels = "Standard deviation")
+text(x = g_mean, y = 0.11, adj = c(-0.2, 1.4), labels = "Standard deviation")
 
 if (SAVE_PLOT_PDF == TRUE){ plot_family = "meiryo" }else{ plot_family = "" }
 mtext(at = g_mean, side = 1, adj = 0.4, cex = 3, text = "\U000261d", family = plot_family)
